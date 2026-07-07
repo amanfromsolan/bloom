@@ -411,6 +411,25 @@ final class TerminalSessionStore: ObservableObject {
         recordRecency(selection)
     }
 
+    /// Every session in recency order across spaces (active space first),
+    /// paired with its containing space for display context.
+    func recencyOrderedSessionsAcrossSpaces() -> [(session: TerminalSession, space: SidebarSpace)] {
+        let orderedSpaces = [activeSpace] + spaces.filter { $0.id != activeSpaceID }
+        return orderedSpaces.flatMap { space in
+            recencyOrderedSessions(inSpace: space.id).map { ($0, space) }
+        }
+    }
+
+    /// Selects a session wherever it lives, switching spaces when needed.
+    func reveal(_ sessionID: TerminalSession.ID) {
+        if !activeSpace.sessions.contains(where: { $0.id == sessionID }),
+           let space = spaces.first(where: { $0.sessions.contains { $0.id == sessionID } }) {
+            setActiveSpace(space.id)
+        }
+        selection = sessionID
+        multiSelection = [sessionID]
+    }
+
     private func recordRecency(_ sessionID: TerminalSession.ID?) {
         guard let sessionID, !isCyclingSelection else { return }
         var order = recency[activeSpaceID] ?? []

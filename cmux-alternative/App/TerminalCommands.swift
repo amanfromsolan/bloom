@@ -5,10 +5,22 @@ struct TerminalCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
+            Button("Command Center") {
+                CommandCenter.shared.toggle()
+            }
+            .keyboardShortcut("t", modifiers: .command)
+
+            Button("Go to Tab…") {
+                CommandCenter.shared.toggle()
+            }
+            .keyboardShortcut("p", modifiers: .command)
+
+            Divider()
+
             Button("New Tab") {
                 store.createSession()
             }
-            .keyboardShortcut("t", modifiers: .command)
+            .keyboardShortcut("t", modifiers: [.command, .shift])
 
             Button("New Folder") {
                 store.createFolder()

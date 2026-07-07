@@ -19,6 +19,11 @@ final class GhosttySurfaceManager {
         return view
     }
 
+    /// The live view for a session, if one was already created.
+    func existingView(for sessionID: TerminalSession.ID) -> GhosttySurfaceView? {
+        views[sessionID]
+    }
+
     func closeSurface(for sessionID: TerminalSession.ID) {
         guard let view = views.removeValue(forKey: sessionID) else { return }
         view.removeFromSuperview()

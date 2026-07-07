@@ -3,6 +3,7 @@ import SwiftUI
 struct TerminalRootView: View {
     @ObservedObject var store: TerminalSessionStore
     @StateObject private var switcher = TabSwitcher()
+    @ObservedObject private var commandCenter = CommandCenter.shared
     @SceneStorage("selectedSessionID") private var storedSelection: String?
 
     var body: some View {
@@ -43,9 +44,26 @@ struct TerminalRootView: View {
                 .ignoresSafeArea()
         )
         .ignoresSafeArea()
+        .overlay(alignment: .top) {
+            if commandCenter.isOpen {
+                ZStack(alignment: .top) {
+                    // Scrim: swallows clicks outside the palette to dismiss.
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture { commandCenter.close() }
+                        .ignoresSafeArea()
+
+                    CommandCenterView(center: commandCenter)
+                        .padding(.top, 90)
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: commandCenter.isOpen)
         .onAppear {
             restoreSelection()
             switcher.attach(to: store)
+            commandCenter.attach(to: store)
         }
         .onChange(of: store.selection) { _, selection in
             storedSelection = selection?.uuidString

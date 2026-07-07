@@ -14,6 +14,7 @@
 		A10000112FD810C30001BF12 /* TerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000022FD810C30001BF12 /* TerminalSession.swift */; };
 		A10000122FD810C30001BF12 /* GhosttyTerminalHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000032FD810C30001BF12 /* GhosttyTerminalHostView.swift */; };
 		A1TABSW012FD810C30001BF12 /* TabSwitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1TABSW022FD810C30001BF12 /* TabSwitcher.swift */; };
+		A1CMDCTR012FD810C30001BF12 /* CommandCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1CMDCTR022FD810C30001BF12 /* CommandCenter.swift */; };
 		A10000132FD810C30001BF12 /* TerminalSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000042FD810C30001BF12 /* TerminalSessionStore.swift */; };
 		A10000142FD810C30001BF12 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000052FD810C30001BF12 /* SidebarView.swift */; };
 		A10000152FD810C30001BF12 /* TerminalHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000062FD810C30001BF12 /* TerminalHeaderView.swift */; };
@@ -47,6 +48,7 @@
 		A10000022FD810C30001BF12 /* TerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSession.swift; sourceTree = "<group>"; };
 		A10000032FD810C30001BF12 /* GhosttyTerminalHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyTerminalHostView.swift; sourceTree = "<group>"; };
 		A1TABSW022FD810C30001BF12 /* TabSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabSwitcher.swift; sourceTree = "<group>"; };
+		A1CMDCTR022FD810C30001BF12 /* CommandCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCenter.swift; sourceTree = "<group>"; };
 		A10000042FD810C30001BF12 /* TerminalSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionStore.swift; sourceTree = "<group>"; };
 		A10000052FD810C30001BF12 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		A10000062FD810C30001BF12 /* TerminalHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalHeaderView.swift; sourceTree = "<group>"; };
@@ -121,6 +123,7 @@
 			children = (
 				A10000032FD810C30001BF12 /* GhosttyTerminalHostView.swift */,
 				A1TABSW022FD810C30001BF12 /* TabSwitcher.swift */,
+				A1CMDCTR022FD810C30001BF12 /* CommandCenter.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -337,6 +340,7 @@
 				A10000112FD810C30001BF12 /* TerminalSession.swift in Sources */,
 				A10000122FD810C30001BF12 /* GhosttyTerminalHostView.swift in Sources */,
 				A1TABSW012FD810C30001BF12 /* TabSwitcher.swift in Sources */,
+				A1CMDCTR012FD810C30001BF12 /* CommandCenter.swift in Sources */,
 				A10000302FD810C30001BF12 /* GhosttyRuntime.swift in Sources */,
 				A10000312FD810C30001BF12 /* GhosttySurfaceView.swift in Sources */,
 				A10000322FD810C30001BF12 /* GhosttySurfaceManager.swift in Sources */,
