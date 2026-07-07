@@ -4,6 +4,7 @@ struct TerminalRootView: View {
     @ObservedObject var store: TerminalSessionStore
     @StateObject private var switcher = TabSwitcher()
     @ObservedObject private var commandCenter = CommandCenter.shared
+    @State private var spaceEditor: SpaceEditorSheet.Mode?
     @SceneStorage("selectedSessionID") private var storedSelection: String?
 
     var body: some View {
@@ -15,7 +16,7 @@ struct TerminalRootView: View {
                     .contentShape(Rectangle())
                     .gesture(WindowDragGesture())
 
-                SidebarView(store: store)
+                SidebarView(store: store, spaceEditor: $spaceEditor)
             }
             .frame(width: 248)
 
@@ -27,7 +28,7 @@ struct TerminalRootView: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.45), radius: 16, y: 4)
+                .shadow(color: .black.opacity(0.22), radius: 12, y: 3)
                 .overlay {
                     if switcher.isShowingHUD {
                         TabSwitcherHUD(switcher: switcher, store: store)
@@ -67,6 +68,44 @@ struct TerminalRootView: View {
                 }
             }
         }
+        // Space editor as an owned in-window modal: macOS sheet windows
+        // force their own chrome (border, corner radius), so we draw the
+        // card and dimming scrim ourselves.
+        .overlay {
+            if let mode = spaceEditor {
+                ZStack {
+                    Color.black.opacity(0.35)
+                        .contentShape(Rectangle())
+                        .onTapGesture { spaceEditor = nil }
+                        .ignoresSafeArea()
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.easeOut(duration: 0.16)),
+                            removal: .opacity.animation(.easeOut(duration: 0.07))
+                        ))
+
+                    SpaceEditorSheet(mode: mode) { name, icon in
+                        switch mode {
+                        case .create:
+                            store.createSpace(name: name, icon: icon)
+                        case .edit(let space):
+                            store.updateSpace(space.id, name: name, icon: icon)
+                        }
+                    } onDismiss: {
+                        spaceEditor = nil
+                    }
+                    // Pops in sharpening from a blur while scaling up;
+                    // leaves with a near-instant fade.
+                    .transition(.asymmetric(
+                        insertion: .modifier(
+                            active: ModalPopEffect(progress: 0),
+                            identity: ModalPopEffect(progress: 1)
+                        )
+                        .animation(.spring(duration: 0.18, bounce: 0.24)),
+                        removal: .opacity.animation(.easeOut(duration: 0.07))
+                    ))
+                }
+            }
+        }
         .onAppear {
             restoreSelection()
             switcher.attach(to: store)
@@ -87,6 +126,18 @@ struct TerminalRootView: View {
         }
 
         store.selection = id
+    }
+}
+
+/// Entrance for owned modals: fades in from a blur while scaling up.
+private struct ModalPopEffect: ViewModifier {
+    let progress: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(0.8 + 0.2 * progress)
+            .blur(radius: 10 * (1 - progress))
+            .opacity(Double(progress))
     }
 }
 

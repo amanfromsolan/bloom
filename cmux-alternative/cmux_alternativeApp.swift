@@ -12,6 +12,13 @@ struct cmux_alternativeApp: App {
     @StateObject private var sessionStore = TerminalSessionStore()
 
     init() {
+        // macOS ships with font smoothing off since Big Sur, which renders
+        // small light-on-dark UI text thin and brittle. Opt this app back in
+        // (CoreText reads the app's preference domain at startup).
+        if UserDefaults.standard.object(forKey: "AppleFontSmoothing") == nil {
+            UserDefaults.standard.set(2, forKey: "AppleFontSmoothing")
+        }
+
         // Start libghostty before any view reads the theme background.
         GhosttyRuntime.shared.ensureStarted()
     }

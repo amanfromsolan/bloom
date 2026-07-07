@@ -5,8 +5,9 @@ struct SidebarView: View {
 
     @State private var dragOffset: CGFloat = 0
     @State private var trailingOverscroll: CGFloat = 0
-    @State private var showNewSpaceSheet = false
-    @State private var spaceBeingEdited: SidebarSpace?
+    /// Presented by the root view as an in-window modal (owned chrome —
+    /// macOS sheet windows force their own border and corner radius).
+    @Binding var spaceEditor: SpaceEditorSheet.Mode?
 
     @State private var expandedFolders = Set<TerminalFolder.ID>()
     @State private var folderBeingRenamed: TerminalFolder?
@@ -20,8 +21,8 @@ struct SidebarView: View {
             pager
             SpaceIndicatorBar(
                 store: store,
-                onEdit: { spaceBeingEdited = $0 },
-                onCreate: { showNewSpaceSheet = true }
+                onEdit: { spaceEditor = .edit($0) },
+                onCreate: { spaceEditor = .create }
             )
         }
         .onAppear {
@@ -29,16 +30,6 @@ struct SidebarView: View {
         }
         .onChange(of: store.spaces.flatMap { $0.pinnedFolders.map(\.id) }) { _, folderIDs in
             expandedFolders.formUnion(folderIDs)
-        }
-        .sheet(isPresented: $showNewSpaceSheet) {
-            SpaceEditorSheet(mode: .create) { name, icon in
-                store.createSpace(name: name, icon: icon)
-            }
-        }
-        .sheet(item: $spaceBeingEdited) { space in
-            SpaceEditorSheet(mode: .edit(space)) { name, icon in
-                store.updateSpace(space.id, name: name, icon: icon)
-            }
         }
         .sheet(item: $folderBeingRenamed) { folder in
             RenameFolderSheet(title: $draftFolderTitle) {
@@ -85,7 +76,7 @@ struct SidebarView: View {
                         draftFolderTitle = folder.title
                         folderBeingRenamed = folder
                     },
-                    onEditSpace: { spaceBeingEdited = $0 }
+                    onEditSpace: { spaceEditor = .edit($0) }
                 )
                 .frame(width: width)
                 // Incoming space fades in and sharpens from a blur as it
@@ -128,7 +119,7 @@ struct SidebarView: View {
         let atLast = currentIndex == store.spaces.count - 1
 
         if atLast, translation < 0, -translation * 0.5 > Self.newSpaceThreshold {
-            showNewSpaceSheet = true
+            spaceEditor = .create
         }
 
         var target = currentIndex
@@ -527,7 +518,7 @@ private struct SpacePage: View {
                     .frame(width: 16)
 
                 Text(folder.title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.white.opacity(0.82))
                     .lineLimit(1)
 
@@ -905,19 +896,21 @@ private struct SpaceIndicatorIcon: View {
 
 // MARK: - Space editor
 
-private struct SpaceEditorSheet: View {
-    enum Mode {
+struct SpaceEditorSheet: View {
+    enum Mode: Equatable {
         case create
         case edit(SidebarSpace)
     }
 
     let mode: Mode
     let onSave: (String, SidebarSpace.Icon) -> Void
+    let onDismiss: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var icon: SidebarSpace.Icon = .symbol("house.fill")
     @State private var showIconPicker = false
+    @State private var iconHovered = false
+    @State private var closeHovered = false
     @FocusState private var nameFocused: Bool
 
     static let symbols = [
@@ -937,22 +930,17 @@ private struct SpaceEditorSheet: View {
                     showIconPicker = true
                 } label: {
                     ZStack {
+                        // Recessed well so the tappable icon area reads as
+                        // a distinct circle; brightens slightly on hover.
                         Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.14), Color.white.opacity(0.05)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                        Circle()
-                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-                        SpaceIndicatorIcon(icon: icon, isActive: true, size: 44)
+                            .fill(Color.black.opacity(iconHovered ? 0.45 : 0.32))
+                        SpaceIndicatorIcon(icon: icon, isActive: true, size: 46)
                     }
-                    .frame(width: 76, height: 76)
+                    .frame(width: 84, height: 84)
                     .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .onHover { iconHovered = $0 }
                 .help("Choose an icon")
                 .popover(isPresented: $showIconPicker, arrowEdge: .bottom) {
                     IconPickerPopover(icon: $icon)
@@ -965,63 +953,91 @@ private struct SpaceEditorSheet: View {
                 } label: {
                     Image(systemName: "shuffle")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.8))
-                        .frame(width: 22, height: 22)
-                        .background(Circle().fill(Color(red: 0.16, green: 0.17, blue: 0.2)))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                        .foregroundStyle(Color.black.opacity(0.8))
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Color.white.opacity(0.94)))
                 }
                 .buttonStyle(.plain)
                 .help("Shuffle icon")
-                .offset(x: 4, y: 4)
             }
-            .padding(.top, 28)
+            .padding(.top, 38)
             .padding(.bottom, 16)
 
             Text(isCreating ? "Create a Space" : "Edit Space")
-                .font(.system(size: 16, weight: .semibold))
-                .padding(.bottom, 4)
+                .font(.system(size: 17, weight: .semibold))
+                .padding(.bottom, 6)
 
-            Text("A space is its own page of tabs — one per project,\nclient, or mood. Swipe the sidebar to move between them.")
-                .font(.system(size: 11.5))
+            Text("A space is its own page of tabs — one per project, client, or mood. Swipe the sidebar to move between them.")
+                .font(.system(size: 12.5))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.bottom, 18)
+                .padding(.horizontal, 44)
+                .padding(.bottom, 24)
 
             TextField("Name your space", text: $name)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .multilineTextAlignment(.center)
+                .font(.system(size: 13.5))
                 .focused($nameFocused)
-                .padding(.vertical, 8)
+                .padding(.vertical, 10)
                 .padding(.horizontal, 12)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(0.06))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .strokeBorder(Color.white.opacity(nameFocused ? 0.25 : 0.1), lineWidth: 1)
-                        )
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.white.opacity(nameFocused ? 0.12 : 0.06))
                 )
-                .frame(width: 220)
                 .onSubmit(saveAndDismiss)
-                .padding(.bottom, 22)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 28)
 
-            HStack(spacing: 10) {
+            // Bottom-aligned footer, web-modal style: two equal-width
+            // solid buttons spanning the sheet.
+            HStack(spacing: 8) {
                 Button("Cancel") {
-                    dismiss()
+                    onDismiss()
                 }
-                .buttonStyle(GhostPillButtonStyle())
+                .buttonStyle(ModalSecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
 
-                Button(isCreating ? "Create Space" : "Save") {
+                Button {
                     saveAndDismiss()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isCreating ? "plus" : "checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                        Text(isCreating ? "Create Space" : "Save")
+                    }
                 }
-                .buttonStyle(ProminentPillButtonStyle())
+                .buttonStyle(ModalPrimaryButtonStyle())
                 .keyboardShortcut(.defaultAction)
             }
+            .padding(.horizontal, 24)
             .padding(.bottom, 24)
         }
-        .frame(width: 320)
+        .frame(width: 420)
+        .overlay(alignment: .topTrailing) {
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(closeHovered ? 0.85 : 0.45))
+                    .frame(width: 30, height: 30)
+                    .background(
+                        Circle().fill(Color.white.opacity(closeHovered ? 0.08 : 0))
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { closeHovered = $0 }
+            .padding(10)
+        }
+        // Fully owned chrome: presented as an in-window overlay, not a
+        // macOS sheet, so no system border or forced corner radius.
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(red: 0.094, green: 0.096, blue: 0.105))
+                .shadow(color: .black.opacity(0.35), radius: 3, y: 2)
+                .shadow(color: .black.opacity(0.5), radius: 40, y: 16)
+        )
         .onAppear {
             if case .edit(let space) = mode {
                 name = space.name
@@ -1035,7 +1051,7 @@ private struct SpaceEditorSheet: View {
 
     private func saveAndDismiss() {
         onSave(name, icon)
-        dismiss()
+        onDismiss()
     }
 
     private var isCreating: Bool {
@@ -1091,39 +1107,60 @@ private struct IconPickerPopover: View {
 
 // MARK: - Button styles
 
-struct ProminentPillButtonStyle: ButtonStyle {
+/// Solid white primary action, web-modal style: full-width rounded
+/// rectangle, dark label, no gradient or border. Brightens on hover.
+struct ModalPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12.5, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(.vertical, 7)
-            .padding(.horizontal, 18)
-            .background(
-                Capsule().fill(
-                    LinearGradient(
-                        colors: [Color.accentColor, Color.accentColor.opacity(0.75)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
+        Styled(configuration: configuration)
+    }
+
+    private struct Styled: View {
+        let configuration: Configuration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.88))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.white.opacity(
+                            configuration.isPressed ? 0.78 : (hovering ? 1 : 0.9)
+                        ))
                 )
-            )
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(.snappy(duration: 0.12), value: configuration.isPressed)
+                .onHover { hovering = $0 }
+                .animation(.snappy(duration: 0.12), value: configuration.isPressed)
+        }
     }
 }
 
-struct GhostPillButtonStyle: ButtonStyle {
+/// Muted gray secondary action matching the primary's geometry.
+struct ModalSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12.5, weight: .medium))
-            .foregroundStyle(.white.opacity(0.75))
-            .padding(.vertical, 7)
-            .padding(.horizontal, 18)
-            .background(Capsule().fill(Color.white.opacity(configuration.isPressed ? 0.12 : 0.07)))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(.snappy(duration: 0.12), value: configuration.isPressed)
+        Styled(configuration: configuration)
+    }
+
+    private struct Styled: View {
+        let configuration: Configuration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(hovering ? 0.92 : 0.8))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.white.opacity(
+                            configuration.isPressed ? 0.16 : (hovering ? 0.13 : 0.09)
+                        ))
+                )
+                .onHover { hovering = $0 }
+                .animation(.snappy(duration: 0.12), value: configuration.isPressed)
+        }
     }
 }
 
@@ -1141,13 +1178,12 @@ private struct RenameFolderSheet: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 320)
 
-            HStack {
-                Spacer()
+            HStack(spacing: 8) {
                 Button("Cancel", action: onCancel)
-                    .buttonStyle(GhostPillButtonStyle())
+                    .buttonStyle(ModalSecondaryButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Button("Save", action: onSave)
-                    .buttonStyle(ProminentPillButtonStyle())
+                    .buttonStyle(ModalPrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -1157,7 +1193,7 @@ private struct RenameFolderSheet: View {
 }
 
 #Preview {
-    SidebarView(store: .preview)
+    SidebarView(store: .preview, spaceEditor: .constant(nil))
         .frame(width: 264, height: 600)
         .background(.black)
 }

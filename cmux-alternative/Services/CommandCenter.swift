@@ -307,16 +307,22 @@ struct CommandCenterView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TextField("Search tabs, spaces, commands…", text: $center.query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 16))
-                .foregroundStyle(.white.opacity(0.92))
-                .focused($searchFocused)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.35))
+
+                TextField("Search tabs, spaces, commands…", text: $center.query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .focused($searchFocused)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 18)
 
             Rectangle()
-                .fill(Color.white.opacity(0.08))
+                .fill(Color.white.opacity(0.04))
                 .frame(height: 1)
 
             if center.items.isEmpty {
@@ -355,7 +361,11 @@ struct CommandCenterView: View {
                 .shadow(color: .black.opacity(0.5), radius: 40, y: 16)
         )
         .onAppear {
-            searchFocused = true
+            // A beat later so focus wins over the terminal NSView, which is
+            // first responder when the palette opens.
+            DispatchQueue.main.async {
+                searchFocused = true
+            }
         }
     }
 
