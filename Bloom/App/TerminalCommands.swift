@@ -42,7 +42,7 @@ struct TerminalCommands: Commands {
 
             Divider()
 
-            Button("New Tab") {
+            Button("New Terminal") {
                 store.createSession()
             }
             .keyboardShortcut("n", modifiers: .command)

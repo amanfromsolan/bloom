@@ -302,7 +302,7 @@ final class CommandCenter: ObservableObject {
         PaletteItem(
             id: "cmd-new-tab",
             icon: .symbol("plus"),
-            title: "New Tab",
+            title: "New Terminal",
             context: "Command",
             verb: "Open"
         ) { [weak store] in

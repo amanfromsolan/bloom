@@ -230,7 +230,7 @@ private struct ModalPopEffect: ViewModifier {
 /// it. SwiftUI hover is unreliable over the terminal's NSView (it owns its
 /// own tracking areas), so a local monitor watches every move.
 private struct PeekMouseMonitor: NSViewRepresentable {
-    static let revealEdge: CGFloat = 56
+    static let revealEdge: CGFloat = 84
     static let dismissEdge: CGFloat = 252
 
     var isPeeking: Bool
@@ -305,13 +305,11 @@ private struct PeekMouseMonitor: NSViewRepresentable {
     }
 }
 
-/// Shifts the traffic lights away from the window corner (doubling the stock
-/// inset) and hides them alongside the sidebar. AppKit resets button frames
-/// on titlebar layout, so the offset is reapplied after resizes and
-/// fullscreen transitions.
+/// Owns traffic-light chrome. The lights sit lower than stock via an empty
+/// unified toolbar (taller titlebar metrics) — AppKit centers them natively,
+/// so the position is stable through every relayout, live resize included;
+/// no frame-fighting. Hiding fades alpha only, which never relayouts.
 private struct TrafficLightInset: NSViewRepresentable {
-    static let extraOffset = CGPoint(x: 7, y: 6)
-
     var buttonsHidden: Bool
 
     func makeNSView(context: Context) -> NSView {
@@ -328,14 +326,25 @@ private struct TrafficLightInset: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
+    @MainActor
     final class Coordinator {
         private weak var window: NSWindow?
-        private var defaultOrigins: [NSWindow.ButtonType: CGPoint] = [:]
-        private var observers: [NSObjectProtocol] = []
         private var buttonsHidden = false
 
-        deinit {
-            observers.forEach(NotificationCenter.default.removeObserver)
+        func attach(to window: NSWindow?) {
+            guard let window, self.window !== window else { return }
+            self.window = window
+
+            // Empty unified toolbar: AppKit gives the titlebar its taller
+            // metrics and vertically centers the traffic lights in it — the
+            // standard technique for lowered lights without frame-fighting.
+            let toolbar = NSToolbar(identifier: "BloomTitlebar")
+            toolbar.showsBaselineSeparator = false
+            window.toolbar = toolbar
+            window.toolbarStyle = .unified
+            window.titlebarAppearsTransparent = true
+
+            applyVisibility(animated: false)
         }
 
         func setButtonsHidden(_ hidden: Bool) {
@@ -344,17 +353,11 @@ private struct TrafficLightInset: NSViewRepresentable {
             applyVisibility(animated: true)
         }
 
-        /// Fades alpha only — flipping isHidden makes AppKit relayout the
-        /// titlebar and reset button frames mid-fade, which reads as the
-        /// lights travelling into place.
         private func applyVisibility(animated: Bool) {
             guard let window else { return }
             let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
                 .compactMap { window.standardWindowButton($0) }
 
-            if !buttonsHidden {
-                apply()
-            }
             let target: CGFloat = buttonsHidden ? 0 : 1
             if animated {
                 NSAnimationContext.runAnimationGroup { context in
@@ -366,44 +369,6 @@ private struct TrafficLightInset: NSViewRepresentable {
             }
             // Invisible buttons must not swallow clicks over the terminal.
             buttons.forEach { $0.isEnabled = !buttonsHidden }
-        }
-
-        func attach(to window: NSWindow?) {
-            guard let window, self.window !== window else { return }
-            self.window = window
-
-            // AppKit resets button frames on titlebar relayouts that no
-            // specific notification covers (NSView.frame isn't reliably
-            // KVO-observable either). didUpdate fires after every window
-            // update cycle, so drift is corrected before it's ever visible;
-            // apply() is a cheap three-frame comparison.
-            observers.append(NotificationCenter.default.addObserver(
-                forName: NSWindow.didUpdateNotification, object: window, queue: .main
-            ) { [weak self] _ in
-                self?.apply()
-            })
-            apply()
-            applyVisibility(animated: false)
-        }
-
-        private func apply() {
-            guard let window, !window.styleMask.contains(.fullScreen) else { return }
-            let offset = TrafficLightInset.extraOffset
-            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-                guard let button = window.standardWindowButton(type),
-                      let superview = button.superview else { continue }
-                if defaultOrigins[type] == nil {
-                    defaultOrigins[type] = button.frame.origin
-                }
-                guard let base = defaultOrigins[type] else { continue }
-                let dy = superview.isFlipped ? offset.y : -offset.y
-                let target = CGPoint(x: base.x + offset.x, y: base.y + dy)
-                // Only correct drift — unconditional writes would ping-pong
-                // with the frame observation.
-                if button.frame.origin != target {
-                    button.setFrameOrigin(target)
-                }
-            }
         }
     }
 }

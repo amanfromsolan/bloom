@@ -23,6 +23,11 @@ final class TerminalSessionStore: ObservableObject {
     /// reshuffle recency; the switcher records its final pick on commit.
     var isCyclingSelection = false
 
+    /// Folders the user collapsed; session-only, shared by the docked
+    /// sidebar and the edge-peek panel so state survives sidebar hiding.
+    /// Inverted (collapsed, not expanded) so new folders start open.
+    @Published var collapsedFolderIDs: Set<TerminalFolder.ID> = []
+
     /// Sidebar visibility (⌘B / titlebar button); remembered across launches.
     @Published var isSidebarVisible: Bool = UserDefaults.standard.object(forKey: "sidebarVisible") as? Bool ?? true {
         didSet { UserDefaults.standard.set(isSidebarVisible, forKey: "sidebarVisible") }

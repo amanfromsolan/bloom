@@ -9,8 +9,6 @@ struct SidebarView: View {
     /// macOS sheet windows force their own border and corner radius).
     @Binding var spaceEditor: SpaceEditorSheet.Mode?
 
-    @State private var expandedFolders = Set<TerminalFolder.ID>()
-
     /// Overscroll distance past the last space that triggers space creation.
     static let newSpaceThreshold: CGFloat = 45
 
@@ -22,12 +20,6 @@ struct SidebarView: View {
                 onEdit: { spaceEditor = .edit($0) },
                 onCreate: { spaceEditor = .create }
             )
-        }
-        .onAppear {
-            expandedFolders.formUnion(store.spaces.flatMap { $0.pinnedFolders.map(\.id) })
-        }
-        .onChange(of: store.spaces.flatMap { $0.pinnedFolders.map(\.id) }) { _, folderIDs in
-            expandedFolders.formUnion(folderIDs)
         }
     }
 
@@ -61,7 +53,6 @@ struct SidebarView: View {
                 SpacePage(
                     store: store,
                     space: space,
-                    expandedFolders: $expandedFolders,
                     onEditSpace: { spaceEditor = .edit($0) }
                 )
                 .frame(width: width)
@@ -277,7 +268,6 @@ private struct SpacePage: View {
     @ObservedObject var store: TerminalSessionStore
     @ObservedObject private var namer = TabAutoNamer.shared
     let space: SidebarSpace
-    @Binding var expandedFolders: Set<TerminalFolder.ID>
     let onEditSpace: (SidebarSpace) -> Void
 
     @State private var dropTargetID: TerminalSession.ID?
@@ -307,7 +297,7 @@ private struct SpacePage: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 10)
             .animation(.snappy(duration: 0.22), value: rowLayout)
-            .animation(.snappy(duration: 0.22), value: expandedFolders)
+            .animation(.snappy(duration: 0.22), value: store.collapsedFolderIDs)
             // Behind the rows, so it only catches clicks on empty sidebar
             // space — row clicks never race it into cancelling a rename.
             .background(
@@ -532,7 +522,7 @@ private struct SpacePage: View {
                     Image(systemName: "plus")
                         .font(.system(size: 11, weight: .semibold))
                         .frame(width: 14)
-                    Text("New Tab")
+                    Text("New Terminal")
                         .font(.system(size: 13, weight: .medium))
                     Spacer(minLength: 0)
                 }
@@ -558,7 +548,7 @@ private struct SpacePage: View {
     }
 
     private func folderSection(_ folder: TerminalFolder) -> some View {
-        let isExpanded = expandedFolders.contains(folder.id)
+        let isExpanded = !store.collapsedFolderIDs.contains(folder.id)
         let isHovered = hoveredFolderID == folder.id
         let isRenaming = renamingFolderID == folder.id
 
@@ -783,10 +773,10 @@ private struct SpacePage: View {
     }
 
     private func toggleExpansion(_ folder: TerminalFolder) {
-        if expandedFolders.contains(folder.id) {
-            expandedFolders.remove(folder.id)
+        if store.collapsedFolderIDs.contains(folder.id) {
+            store.collapsedFolderIDs.remove(folder.id)
         } else {
-            expandedFolders.insert(folder.id)
+            store.collapsedFolderIDs.insert(folder.id)
         }
     }
 
@@ -894,7 +884,7 @@ private struct SpacePage: View {
 
     private func visibleOrder() -> [TerminalSession.ID] {
         var order = space.pinnedSessions.map(\.id)
-        for folder in space.pinnedFolders where expandedFolders.contains(folder.id) {
+        for folder in space.pinnedFolders where !store.collapsedFolderIDs.contains(folder.id) {
             order += folder.sessions.map(\.id)
         }
         order += space.ephemeralSessions.map(\.id)
