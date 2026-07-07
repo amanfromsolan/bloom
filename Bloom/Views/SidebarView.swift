@@ -1,0 +1,1358 @@
+import SwiftUI
+
+struct SidebarView: View {
+    @ObservedObject var store: TerminalSessionStore
+
+    @State private var dragOffset: CGFloat = 0
+    @State private var trailingOverscroll: CGFloat = 0
+    /// Presented by the root view as an in-window modal (owned chrome —
+    /// macOS sheet windows force their own border and corner radius).
+    @Binding var spaceEditor: SpaceEditorSheet.Mode?
+
+    @State private var expandedFolders = Set<TerminalFolder.ID>()
+    @State private var folderBeingRenamed: TerminalFolder?
+    @State private var draftFolderTitle = ""
+
+    /// Overscroll distance past the last space that triggers space creation.
+    static let newSpaceThreshold: CGFloat = 45
+
+    var body: some View {
+        VStack(spacing: 0) {
+            pager
+            SpaceIndicatorBar(
+                store: store,
+                onEdit: { spaceEditor = .edit($0) },
+                onCreate: { spaceEditor = .create }
+            )
+        }
+        .onAppear {
+            expandedFolders.formUnion(store.spaces.flatMap { $0.pinnedFolders.map(\.id) })
+        }
+        .onChange(of: store.spaces.flatMap { $0.pinnedFolders.map(\.id) }) { _, folderIDs in
+            expandedFolders.formUnion(folderIDs)
+        }
+        .sheet(item: $folderBeingRenamed) { folder in
+            RenameFolderSheet(title: $draftFolderTitle) {
+                folderBeingRenamed = nil
+            } onSave: {
+                store.rename(folder, to: draftFolderTitle)
+                folderBeingRenamed = nil
+            }
+        }
+    }
+
+    static let pageWidth: CGFloat = 248
+
+    private var currentIndex: Int {
+        store.spaces.firstIndex { $0.id == store.activeSpaceID } ?? 0
+    }
+
+    /// Drag offset with rubber-band resistance at both ends, hard-clamped to
+    /// one page so a single gesture can never travel further than a neighbor.
+    private var visualDrag: CGFloat {
+        var offset = dragOffset
+        if offset > 0 && currentIndex == 0 {
+            offset *= 0.5
+        }
+        if offset < 0 && currentIndex == store.spaces.count - 1 {
+            offset *= 0.5
+        }
+        return min(Self.pageWidth, max(-Self.pageWidth, offset))
+    }
+
+    private var pager: some View {
+        let width = Self.pageWidth
+        // Fractional page position, shared by the offset and the fade/blur.
+        let position = CGFloat(currentIndex) - visualDrag / width
+
+        return HStack(spacing: 0) {
+            ForEach(Array(store.spaces.enumerated()), id: \.element.id) { index, space in
+                let distance = min(abs(CGFloat(index) - position), 1)
+                SpacePage(
+                    store: store,
+                    space: space,
+                    expandedFolders: $expandedFolders,
+                    onRenameFolder: { folder in
+                        draftFolderTitle = folder.title
+                        folderBeingRenamed = folder
+                    },
+                    onEditSpace: { spaceEditor = .edit($0) }
+                )
+                .frame(width: width)
+                // Incoming space fades in and sharpens from a blur as it
+                // slides in; the outgoing one does the reverse.
+                .opacity(1 - 0.65 * distance)
+                .blur(radius: 5 * distance)
+            }
+        }
+        .offset(x: -position * width)
+        .frame(width: width, alignment: .leading)
+        .clipped()
+        .background(
+            SidebarSwipeCapture(
+                onChanged: { translation in
+                    dragOffset = translation
+                    updateOverscroll()
+                },
+                onEnded: { translation, velocity in
+                    finishSwipe(translation: translation, velocity: velocity)
+                }
+            )
+        )
+        .overlay(alignment: .trailing) {
+            if trailingOverscroll > 4 {
+                NewSpaceTeaser(progress: min(trailingOverscroll / Self.newSpaceThreshold, 1))
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func updateOverscroll() {
+        if currentIndex == store.spaces.count - 1, dragOffset < 0 {
+            trailingOverscroll = -visualDrag
+        } else {
+            trailingOverscroll = 0
+        }
+    }
+
+    private func finishSwipe(translation: CGFloat, velocity: CGFloat) {
+        let atLast = currentIndex == store.spaces.count - 1
+
+        if atLast, translation < 0, -translation * 0.5 > Self.newSpaceThreshold {
+            spaceEditor = .create
+        }
+
+        var target = currentIndex
+        if translation < 0, -translation > Self.pageWidth * 0.35 || velocity < -6 {
+            target += 1
+        } else if translation > 0, translation > Self.pageWidth * 0.35 || velocity > 6 {
+            target -= 1
+        }
+        target = min(max(target, 0), store.spaces.count - 1)
+
+        withAnimation(.spring(duration: 0.32, bounce: 0.12)) {
+            dragOffset = 0
+            trailingOverscroll = 0
+            if target != currentIndex {
+                store.setActiveSpace(store.spaces[target].id)
+            }
+        }
+    }
+}
+
+/// Captures two-finger horizontal pans over the sidebar with a local event
+/// monitor, bypassing NSScrollView's momentum system entirely. One gesture
+/// produces one translation stream; trailing momentum events are swallowed,
+/// so a flick can never carry the pager past the adjacent space.
+private struct SidebarSwipeCapture: NSViewRepresentable {
+    let onChanged: (CGFloat) -> Void
+    let onEnded: (CGFloat, CGFloat) -> Void
+
+    func makeNSView(context: Context) -> CaptureView {
+        let view = CaptureView()
+        view.onChanged = onChanged
+        view.onEnded = onEnded
+        return view
+    }
+
+    func updateNSView(_ nsView: CaptureView, context: Context) {
+        nsView.onChanged = onChanged
+        nsView.onEnded = onEnded
+    }
+
+    final class CaptureView: NSView {
+        var onChanged: ((CGFloat) -> Void)?
+        var onEnded: ((CGFloat, CGFloat) -> Void)?
+
+        private var monitor: Any?
+        private var gestureState: GestureState = .idle
+        private var translation: CGFloat = 0
+        private var recentDeltas: [CGFloat] = []
+
+        private enum GestureState {
+            case idle
+            /// Fingers down over us, direction not yet determined.
+            case pending
+            /// Horizontal pan in progress; we own every event until it ends.
+            case active
+            /// Gesture was ours; swallow the momentum tail.
+            case coasting
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil, monitor == nil {
+                monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                    self?.handle(event) ?? event
+                }
+            }
+            if window == nil, let monitor {
+                NSEvent.removeMonitor(monitor)
+                self.monitor = nil
+            }
+        }
+
+        deinit {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+        }
+
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            guard let window, event.window === window else { return event }
+
+            if event.momentumPhase != [] {
+                guard gestureState == .coasting else { return event }
+                if event.momentumPhase == .ended || event.momentumPhase == .cancelled {
+                    gestureState = .idle
+                }
+                return nil
+            }
+
+            switch event.phase {
+            case .began:
+                let point = convert(event.locationInWindow, from: nil)
+                gestureState = bounds.contains(point) ? .pending : .idle
+                translation = 0
+                recentDeltas = []
+                return event
+
+            case .changed:
+                if gestureState == .pending {
+                    // First meaningful delta decides the gesture's direction.
+                    guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else {
+                        gestureState = .idle
+                        return event
+                    }
+                    gestureState = .active
+                }
+                guard gestureState == .active else { return event }
+                translation += event.scrollingDeltaX
+                recentDeltas.append(event.scrollingDeltaX)
+                if recentDeltas.count > 5 {
+                    recentDeltas.removeFirst()
+                }
+                onChanged?(translation)
+                return nil
+
+            case .ended, .cancelled:
+                guard gestureState == .active else {
+                    gestureState = .idle
+                    return event
+                }
+                gestureState = .coasting
+                let velocity = recentDeltas.isEmpty
+                    ? 0
+                    : recentDeltas.reduce(0, +) / CGFloat(recentDeltas.count)
+                onEnded?(translation, velocity)
+                return nil
+
+            default:
+                return event
+            }
+        }
+    }
+}
+
+/// The plus badge that fades in while over-swiping past the last space:
+/// it slides in from the edge, grows, and its ring fills with the drag —
+/// release when full to create.
+private struct NewSpaceTeaser: View {
+    let progress: CGFloat
+
+    var body: some View {
+        ZStack {
+                Circle()
+                    .fill(Color.black.opacity(0.45))
+                Circle()
+                    .stroke(Color.white.opacity(0.14), lineWidth: 2)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(
+                        Color.accentColor,
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.35 + 0.65 * progress))
+        }
+        .frame(width: 30, height: 30)
+        .scaleEffect(0.72 + 0.42 * progress)
+        .padding(.trailing, 8)
+        .offset(x: -14 * progress)
+        .animation(.interactiveSpring, value: progress)
+    }
+}
+
+// MARK: - One space page
+
+private struct SpacePage: View {
+    @ObservedObject var store: TerminalSessionStore
+    @ObservedObject private var namer = TabAutoNamer.shared
+    let space: SidebarSpace
+    @Binding var expandedFolders: Set<TerminalFolder.ID>
+    let onRenameFolder: (TerminalFolder) -> Void
+    let onEditSpace: (SidebarSpace) -> Void
+
+    @State private var dropTargetID: TerminalSession.ID?
+    @State private var hoveredSessionID: TerminalSession.ID?
+    @State private var renamingSessionID: TerminalSession.ID?
+    @State private var draftTitle = ""
+    @FocusState private var renameFieldFocused: Bool
+
+    @State private var hoveredFolderID: TerminalFolder.ID?
+    @State private var headerHovered = false
+    @State private var headerMenuHovered = false
+    @State private var newTabHovered = false
+    @State private var isRenamingSpace = false
+    @State private var draftSpaceName = ""
+    @FocusState private var spaceNameFocused: Bool
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                pinnedZone
+                zoneDivider
+                ephemeralZone
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
+            .animation(.snappy(duration: 0.22), value: rowLayout)
+            .animation(.snappy(duration: 0.22), value: expandedFolders)
+            // Behind the rows, so it only catches clicks on empty sidebar
+            // space — row clicks never race it into cancelling a rename.
+            .background(
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { cancelRenames() }
+            )
+        }
+    }
+
+    /// Row layout identity: animates structural changes (add/remove/reorder,
+    /// pin/unpin) without animating metadata-only updates — selecting a tab
+    /// stamps its lastActivity, and that must not fade the highlight in.
+    private var rowLayout: [UUID] {
+        var ids = space.pinnedSessions.map(\.id)
+        for folder in space.pinnedFolders {
+            ids.append(folder.id)
+            ids.append(contentsOf: folder.sessions.map(\.id))
+        }
+        ids.append(contentsOf: space.ephemeralSessions.map(\.id))
+        return ids
+    }
+
+    /// Clicking empty sidebar space backs out of any in-progress rename.
+    private func cancelRenames() {
+        isRenamingSpace = false
+        renamingSessionID = nil
+    }
+
+    // MARK: - Space header
+
+    private var spaceHeader: some View {
+        HStack(spacing: 8) {
+            SpaceIndicatorIcon(icon: space.icon, isActive: true, size: 15)
+                .frame(width: 16)
+
+            if isRenamingSpace {
+                TextField("", text: $draftSpaceName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .focused($spaceNameFocused)
+                    .onSubmit(commitSpaceRename)
+                    .onExitCommand {
+                        isRenamingSpace = false
+                    }
+            } else {
+                Text(space.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            if headerHovered && !isRenamingSpace {
+                HoverIconButton(systemName: "pencil", help: "Rename Space") {
+                    beginSpaceRename()
+                }
+
+                Menu {
+                    Button("Edit Icon & Name…", systemImage: "pencil.and.outline") {
+                        onEditSpace(space)
+                    }
+                    Button("Delete Space", systemImage: "trash") {
+                        store.deleteSpace(space.id)
+                    }
+                    .disabled(store.spaces.count == 1)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(headerMenuHovered ? 0.9 : 0.55))
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 18, height: 18)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(headerMenuHovered ? 0.12 : 0))
+                )
+                .onHover { headerMenuHovered = $0 }
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(headerHovered ? Color.white.opacity(0.05) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            headerHovered = hovering
+        }
+        .onTapGesture(count: 2) {
+            beginSpaceRename()
+        }
+        .padding(.bottom, 4)
+    }
+
+    private func beginSpaceRename() {
+        draftSpaceName = space.name
+        isRenamingSpace = true
+        spaceNameFocused = true
+    }
+
+    private func commitSpaceRename() {
+        guard isRenamingSpace else { return }
+        isRenamingSpace = false
+        store.renameSpace(space.id, to: draftSpaceName)
+    }
+
+    private var pinnedZone: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            spaceHeader
+                .onChange(of: spaceNameFocused) { _, focused in
+                    if !focused, isRenamingSpace {
+                        commitSpaceRename()
+                    }
+                }
+
+            if space.pinnedSessions.isEmpty && space.pinnedFolders.isEmpty {
+                Text("Drag tabs here to keep them")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.28))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 8)
+            }
+
+            ForEach(space.pinnedSessions) { session in
+                sessionRow(session)
+            }
+
+            ForEach(space.pinnedFolders) { folder in
+                folderSection(folder)
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .dropDestination(for: String.self) { items, _ in
+            store.pin(sessionIDs(from: items), inSpace: space.id)
+            return true
+        }
+    }
+
+    private var zoneDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.1))
+            .frame(height: 1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 8)
+    }
+
+    private var ephemeralZone: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(space.ephemeralSessions) { session in
+                sessionRow(session)
+            }
+
+            Button {
+                store.createSession(inSpace: space.id)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 14)
+                    Text("New Tab")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.white.opacity(newTabHovered ? 0.7 : 0.45))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(newTabHovered ? Color.white.opacity(0.05) : Color.clear)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { newTabHovered = $0 }
+
+            Spacer(minLength: 120)
+        }
+        .contentShape(Rectangle())
+        .dropDestination(for: String.self) { items, _ in
+            store.unpin(sessionIDs(from: items), inSpace: space.id)
+            return true
+        }
+    }
+
+    private func folderSection(_ folder: TerminalFolder) -> some View {
+        let isExpanded = expandedFolders.contains(folder.id)
+        let isHovered = hoveredFolderID == folder.id
+
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                FolderGlyph(isOpen: isExpanded)
+                    .fill(.white.opacity(0.6), style: FillStyle(eoFill: true))
+                    .frame(width: 14, height: 14)
+                    .frame(width: 16)
+
+                Text(folder.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .opacity(isHovered ? 1 : 0)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(isHovered ? Color.white.opacity(0.06) : Color.clear)
+            )
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    hoveredFolderID = folder.id
+                } else if hoveredFolderID == folder.id {
+                    hoveredFolderID = nil
+                }
+            }
+            .onTapGesture {
+                if isExpanded {
+                    expandedFolders.remove(folder.id)
+                } else {
+                    expandedFolders.insert(folder.id)
+                }
+            }
+            .contextMenu {
+                Button("Rename Folder", systemImage: "pencil") {
+                    onRenameFolder(folder)
+                }
+                Button("Delete Folder", systemImage: "trash") {
+                    store.deleteFolder(folder.id)
+                }
+            }
+            .dropDestination(for: String.self) { items, _ in
+                store.move(sessionIDs(from: items), toFolder: folder.id)
+                return true
+            }
+
+            // Children live in a container that collapses to zero height and
+            // clips, so rows disappear into the folder instead of floating.
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(folder.sessions) { session in
+                    sessionRow(session)
+                }
+            }
+            .padding(.leading, 14)
+            .frame(height: isExpanded ? nil : 0, alignment: .top)
+            .clipped()
+            .allowsHitTesting(isExpanded)
+            .opacity(isExpanded ? 1 : 0)
+        }
+    }
+
+    @ViewBuilder
+    private func sessionRow(_ session: TerminalSession) -> some View {
+        let isSelected = store.selection == session.id
+        let isMultiSelected = store.multiSelection.contains(session.id)
+        let isRenaming = renamingSessionID == session.id
+
+        VStack(spacing: 0) {
+            // Insertion indicator while another tab is dragged over this row.
+            RoundedRectangle(cornerRadius: 1)
+                .fill(Color.accentColor)
+                .frame(height: 2)
+                .padding(.horizontal, 4)
+                .opacity(dropTargetID == session.id ? 1 : 0)
+
+            HStack(spacing: 8) {
+                if namer.namingSessions.contains(session.id) {
+                    AutoNamingIndicator()
+                        .frame(width: 7, height: 7)
+                } else {
+                    Circle()
+                        .fill(session.accent.color.opacity(isSelected ? 0.95 : 0.55))
+                        .frame(width: 7, height: 7)
+                }
+
+                if isRenaming {
+                    TextField("", text: $draftTitle)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white)
+                        .focused($renameFieldFocused)
+                        .onSubmit {
+                            commitRename(session)
+                        }
+                        .onExitCommand {
+                            renamingSessionID = nil
+                        }
+                } else {
+                    Text(session.title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(isSelected ? 0.95 : 0.62))
+                        .lineLimit(1)
+                        .nameShimmer(namer.namingSessions.contains(session.id))
+                }
+
+                Spacer(minLength: 0)
+                if hoveredSessionID == session.id && !isRenaming {
+                    SessionCloseButton {
+                        store.close(sessionID: session.id)
+                    }
+                } else if session.status == .attention {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(
+                        isSelected
+                            ? Color.white.opacity(0.14)
+                            : (isMultiSelected
+                                ? Color.white.opacity(0.07)
+                                : (hoveredSessionID == session.id
+                                    ? Color.white.opacity(0.05)
+                                    : Color.clear))
+                    )
+            )
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    hoveredSessionID = session.id
+                } else if hoveredSessionID == session.id {
+                    hoveredSessionID = nil
+                }
+            }
+            // A single immediate gesture (no TapGesture(count: 2) sibling):
+            // pairing single+double tap makes SwiftUI hold every click for
+            // the double-click interval before selecting. Instead, select on
+            // every click instantly and start rename when the event stream
+            // says this click was the second one.
+            .simultaneousGesture(TapGesture().onEnded {
+                if NSApp.currentEvent?.clickCount == 2 {
+                    beginRename(session)
+                } else {
+                    handleTap(session)
+                }
+            })
+            .draggable(dragPayload(for: session))
+            .contextMenu {
+                contextMenu(for: session)
+            }
+        }
+        .dropDestination(for: String.self) { items, _ in
+            dropTargetID = nil
+            store.insert(sessionIDs(from: items), before: session.id)
+            return true
+        } isTargeted: { targeted in
+            if targeted {
+                dropTargetID = session.id
+            } else if dropTargetID == session.id {
+                dropTargetID = nil
+            }
+        }
+        .onChange(of: renameFieldFocused) { _, focused in
+            if !focused, renamingSessionID == session.id {
+                commitRename(session)
+            }
+        }
+    }
+
+    private func beginRename(_ session: TerminalSession) {
+        draftTitle = session.title
+        renamingSessionID = session.id
+        renameFieldFocused = true
+    }
+
+    private func commitRename(_ session: TerminalSession) {
+        guard renamingSessionID == session.id else { return }
+        renamingSessionID = nil
+        store.rename(session, to: draftTitle)
+    }
+
+    @ViewBuilder
+    private func contextMenu(for session: TerminalSession) -> some View {
+        let targets = contextTargets(for: session)
+        let plural = targets.count > 1 ? " \(targets.count) Tabs" : " Tab"
+
+        Button("New Folder with\(plural)", systemImage: "folder.badge.plus") {
+            store.createFolder(with: targets, inSpace: space.id)
+        }
+
+        if !space.pinnedFolders.isEmpty {
+            Menu("Move to Folder") {
+                ForEach(space.pinnedFolders) { folder in
+                    Button(folder.title) {
+                        store.move(targets, toFolder: folder.id)
+                    }
+                }
+            }
+        }
+
+        if store.spaces.count > 1 {
+            Menu("Move to Space") {
+                ForEach(store.spaces.filter { $0.id != space.id }) { other in
+                    Button(other.name) {
+                        store.unpin(targets, inSpace: other.id)
+                    }
+                }
+            }
+        }
+
+        if targets.contains(where: { !store.isPinned($0) }) {
+            Button("Pin\(plural)", systemImage: "pin") {
+                store.pin(targets, inSpace: space.id)
+            }
+        }
+        if targets.contains(where: { store.isPinned($0) }) {
+            Button("Unpin\(plural)", systemImage: "pin.slash") {
+                store.unpin(targets, inSpace: space.id)
+            }
+        }
+
+        if targets.count == 1 {
+            Button("Rename", systemImage: "pencil") {
+                beginRename(session)
+            }
+        }
+
+        Divider()
+
+        Button("Close\(plural)", systemImage: "xmark") {
+            store.close(sessionIDs: targets)
+        }
+    }
+
+    private func handleTap(_ session: TerminalSession) {
+        // The row tap fires alongside the close button's action; never
+        // select a session the button just closed.
+        guard store.sessions.contains(where: { $0.id == session.id }) else { return }
+        cancelRenames()
+        let flags = NSEvent.modifierFlags
+
+        if flags.contains(.command) {
+            if store.multiSelection.contains(session.id) {
+                store.multiSelection.remove(session.id)
+            } else {
+                store.multiSelection.insert(session.id)
+            }
+            store.selection = session.id
+        } else if flags.contains(.shift), let anchor = store.selection {
+            let order = visibleOrder()
+            if let from = order.firstIndex(of: anchor), let to = order.firstIndex(of: session.id) {
+                store.multiSelection.formUnion(order[min(from, to)...max(from, to)])
+            }
+        } else {
+            store.selection = session.id
+            store.multiSelection = [session.id]
+        }
+    }
+
+    private func contextTargets(for session: TerminalSession) -> Set<TerminalSession.ID> {
+        store.multiSelection.count > 1 && store.multiSelection.contains(session.id)
+            ? store.multiSelection
+            : [session.id]
+    }
+
+    private func visibleOrder() -> [TerminalSession.ID] {
+        var order = space.pinnedSessions.map(\.id)
+        for folder in space.pinnedFolders where expandedFolders.contains(folder.id) {
+            order += folder.sessions.map(\.id)
+        }
+        order += space.ephemeralSessions.map(\.id)
+        return order
+    }
+
+    private func dragPayload(for session: TerminalSession) -> String {
+        contextTargets(for: session).map(\.uuidString).joined(separator: ",")
+    }
+
+    private func sessionIDs(from items: [String]) -> Set<TerminalSession.ID> {
+        Set(items.flatMap { $0.split(separator: ",") }.compactMap { UUID(uuidString: String($0)) })
+    }
+
+}
+
+/// 18×18 icon button with its own hover wash so the click target reads
+/// before the mouse commits.
+private struct HoverIconButton: View {
+    let systemName: String
+    let help: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(isHovered ? 0.9 : 0.55))
+                .frame(width: 18, height: 18)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(isHovered ? 0.12 : 0))
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help(help)
+    }
+}
+
+/// Small spinner in the tab row's dot slot while the LLM is naming it.
+private struct AutoNamingIndicator: View {
+    @State private var spinning = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0.18, to: 1)
+            .stroke(
+                .white.opacity(0.6),
+                style: StrokeStyle(lineWidth: 1.2, lineCap: .round)
+            )
+            .rotationEffect(.degrees(spinning ? 360 : 0))
+            .onAppear {
+                withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
+                    spinning = true
+                }
+            }
+    }
+}
+
+/// Gradient band sweeping across the tab title while it's being auto-named.
+private struct NameShimmer: ViewModifier {
+    @State private var phase: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(
+                GeometryReader { geo in
+                    let band = geo.size.width * 0.9
+                    LinearGradient(
+                        colors: [.clear, .cyan, .purple, .pink, .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: band)
+                    .offset(x: -band + phase * (geo.size.width + band * 2))
+                }
+                .allowsHitTesting(false)
+            )
+            .mask(content)
+            .onAppear {
+                withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                    phase = 1
+                }
+            }
+    }
+}
+
+private extension View {
+    /// Conditional shimmer; the if/else swap resets the animation each time
+    /// naming starts.
+    @ViewBuilder
+    func nameShimmer(_ active: Bool) -> some View {
+        if active {
+            modifier(NameShimmer())
+        } else {
+            self
+        }
+    }
+}
+
+/// Hover-revealed × on a tab row; its own hover highlight so the click
+/// target reads before the mouse commits.
+private struct SessionCloseButton: View {
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.white.opacity(isHovered ? 0.9 : 0.5))
+                .frame(width: 16, height: 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(isHovered ? 0.14 : 0))
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help("Close Tab")
+    }
+}
+
+/// Phosphor folder icons (regular weight), flattened to normalized
+/// polylines. SF Symbols has no open-folder glyph.
+private struct FolderGlyph: Shape {
+    let isOpen: Bool
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        for sub in isOpen ? Self.open : Self.closed {
+            guard let first = sub.first else { continue }
+            path.move(to: scaled(first, rect))
+            for point in sub.dropFirst() {
+                path.addLine(to: scaled(point, rect))
+            }
+            path.closeSubpath()
+        }
+        return path
+    }
+
+    private func scaled(_ point: CGPoint, _ rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.minX + point.x * rect.width, y: rect.minY + point.y * rect.height)
+    }
+
+    private static let closed: [[CGPoint]] = [
+        [CGPoint(x: 0.8438, y: 0.2656), CGPoint(x: 0.8241, y: 0.2656), CGPoint(x: 0.8045, y: 0.2656), CGPoint(x: 0.7849, y: 0.2656), CGPoint(x: 0.7653, y: 0.2656), CGPoint(x: 0.7457, y: 0.2656), CGPoint(x: 0.726, y: 0.2656), CGPoint(x: 0.7064, y: 0.2656), CGPoint(x: 0.6868, y: 0.2656), CGPoint(x: 0.6672, y: 0.2656), CGPoint(x: 0.6476, y: 0.2656), CGPoint(x: 0.6279, y: 0.2656), CGPoint(x: 0.6083, y: 0.2656), CGPoint(x: 0.5887, y: 0.2656), CGPoint(x: 0.5691, y: 0.2656), CGPoint(x: 0.5495, y: 0.2656), CGPoint(x: 0.5298, y: 0.2656), CGPoint(x: 0.5139, y: 0.2575), CGPoint(x: 0.5008, y: 0.2428), CGPoint(x: 0.4878, y: 0.2282), CGPoint(x: 0.4748, y: 0.2135), CGPoint(x: 0.4618, y: 0.1988), CGPoint(x: 0.4487, y: 0.1842), CGPoint(x: 0.4357, y: 0.1695), CGPoint(x: 0.4227, y: 0.1548), CGPoint(x: 0.4087, y: 0.1411), CGPoint(x: 0.3918, y: 0.1313), CGPoint(x: 0.373, y: 0.1259), CGPoint(x: 0.3534, y: 0.125), CGPoint(x: 0.3338, y: 0.125), CGPoint(x: 0.3141, y: 0.125), CGPoint(x: 0.2945, y: 0.125), CGPoint(x: 0.2749, y: 0.125), CGPoint(x: 0.2553, y: 0.125), CGPoint(x: 0.2357, y: 0.125), CGPoint(x: 0.216, y: 0.125), CGPoint(x: 0.1964, y: 0.125), CGPoint(x: 0.1768, y: 0.125), CGPoint(x: 0.1572, y: 0.125), CGPoint(x: 0.1377, y: 0.1272), CGPoint(x: 0.1195, y: 0.1342), CGPoint(x: 0.1035, y: 0.1455), CGPoint(x: 0.0908, y: 0.1604), CGPoint(x: 0.0823, y: 0.178), CGPoint(x: 0.0784, y: 0.1972), CGPoint(x: 0.0781, y: 0.2168), CGPoint(x: 0.0781, y: 0.2364), CGPoint(x: 0.0781, y: 0.256), CGPoint(x: 0.0781, y: 0.2757), CGPoint(x: 0.0781, y: 0.2953), CGPoint(x: 0.0781, y: 0.3149), CGPoint(x: 0.0781, y: 0.3345), CGPoint(x: 0.0781, y: 0.3541), CGPoint(x: 0.0781, y: 0.3738), CGPoint(x: 0.0781, y: 0.3934), CGPoint(x: 0.0781, y: 0.413), CGPoint(x: 0.0781, y: 0.4326), CGPoint(x: 0.0781, y: 0.4522), CGPoint(x: 0.0781, y: 0.4719), CGPoint(x: 0.0781, y: 0.4915), CGPoint(x: 0.0781, y: 0.5111), CGPoint(x: 0.0781, y: 0.5307), CGPoint(x: 0.0781, y: 0.5503), CGPoint(x: 0.0781, y: 0.57), CGPoint(x: 0.0781, y: 0.5896), CGPoint(x: 0.0781, y: 0.6092), CGPoint(x: 0.0781, y: 0.6288), CGPoint(x: 0.0781, y: 0.6484), CGPoint(x: 0.0781, y: 0.6681), CGPoint(x: 0.0781, y: 0.6877), CGPoint(x: 0.0781, y: 0.7073), CGPoint(x: 0.0781, y: 0.7269), CGPoint(x: 0.0781, y: 0.7465), CGPoint(x: 0.0781, y: 0.7662), CGPoint(x: 0.0782, y: 0.7858), CGPoint(x: 0.0812, y: 0.8051), CGPoint(x: 0.0892, y: 0.823), CGPoint(x: 0.1014, y: 0.8382), CGPoint(x: 0.1172, y: 0.8499), CGPoint(x: 0.1354, y: 0.8571), CGPoint(x: 0.1548, y: 0.8594), CGPoint(x: 0.1744, y: 0.8594), CGPoint(x: 0.194, y: 0.8594), CGPoint(x: 0.2136, y: 0.8594), CGPoint(x: 0.2333, y: 0.8594), CGPoint(x: 0.2529, y: 0.8594), CGPoint(x: 0.2725, y: 0.8594), CGPoint(x: 0.2921, y: 0.8594), CGPoint(x: 0.3117, y: 0.8594), CGPoint(x: 0.3314, y: 0.8594), CGPoint(x: 0.351, y: 0.8594), CGPoint(x: 0.3706, y: 0.8594), CGPoint(x: 0.3902, y: 0.8594), CGPoint(x: 0.4098, y: 0.8594), CGPoint(x: 0.4295, y: 0.8594), CGPoint(x: 0.4491, y: 0.8594), CGPoint(x: 0.4687, y: 0.8594), CGPoint(x: 0.4883, y: 0.8594), CGPoint(x: 0.5079, y: 0.8594), CGPoint(x: 0.5276, y: 0.8594), CGPoint(x: 0.5472, y: 0.8594), CGPoint(x: 0.5668, y: 0.8594), CGPoint(x: 0.5864, y: 0.8594), CGPoint(x: 0.606, y: 0.8594), CGPoint(x: 0.6256, y: 0.8594), CGPoint(x: 0.6453, y: 0.8594), CGPoint(x: 0.6649, y: 0.8594), CGPoint(x: 0.6845, y: 0.8594), CGPoint(x: 0.7041, y: 0.8594), CGPoint(x: 0.7237, y: 0.8594), CGPoint(x: 0.7434, y: 0.8594), CGPoint(x: 0.763, y: 0.8594), CGPoint(x: 0.7826, y: 0.8594), CGPoint(x: 0.8022, y: 0.8594), CGPoint(x: 0.8218, y: 0.8594), CGPoint(x: 0.8415, y: 0.8594), CGPoint(x: 0.861, y: 0.8581), CGPoint(x: 0.8796, y: 0.852), CGPoint(x: 0.8959, y: 0.8412), CGPoint(x: 0.909, y: 0.8266), CGPoint(x: 0.9177, y: 0.8092), CGPoint(x: 0.9217, y: 0.79), CGPoint(x: 0.9219, y: 0.7704), CGPoint(x: 0.9219, y: 0.7508), CGPoint(x: 0.9219, y: 0.7311), CGPoint(x: 0.9219, y: 0.7115), CGPoint(x: 0.9219, y: 0.6919), CGPoint(x: 0.9219, y: 0.6723), CGPoint(x: 0.9219, y: 0.6527), CGPoint(x: 0.9219, y: 0.633), CGPoint(x: 0.9219, y: 0.6134), CGPoint(x: 0.9219, y: 0.5938), CGPoint(x: 0.9219, y: 0.5742), CGPoint(x: 0.9219, y: 0.5546), CGPoint(x: 0.9219, y: 0.5349), CGPoint(x: 0.9219, y: 0.5153), CGPoint(x: 0.9219, y: 0.4957), CGPoint(x: 0.9219, y: 0.4761), CGPoint(x: 0.9219, y: 0.4565), CGPoint(x: 0.9219, y: 0.4368), CGPoint(x: 0.9219, y: 0.4172), CGPoint(x: 0.9219, y: 0.3976), CGPoint(x: 0.9219, y: 0.378), CGPoint(x: 0.9219, y: 0.3584), CGPoint(x: 0.9217, y: 0.3388), CGPoint(x: 0.918, y: 0.3195), CGPoint(x: 0.9097, y: 0.3018), CGPoint(x: 0.8972, y: 0.2868), CGPoint(x: 0.8814, y: 0.2753), CGPoint(x: 0.8632, y: 0.2681), CGPoint(x: 0.8438, y: 0.2656)],
+        [CGPoint(x: 0.1719, y: 0.2188), CGPoint(x: 0.1917, y: 0.2188), CGPoint(x: 0.2115, y: 0.2188), CGPoint(x: 0.2313, y: 0.2188), CGPoint(x: 0.2512, y: 0.2188), CGPoint(x: 0.271, y: 0.2188), CGPoint(x: 0.2908, y: 0.2188), CGPoint(x: 0.3106, y: 0.2188), CGPoint(x: 0.3305, y: 0.2188), CGPoint(x: 0.3503, y: 0.2188), CGPoint(x: 0.3647, y: 0.2308), CGPoint(x: 0.3779, y: 0.2456), CGPoint(x: 0.391, y: 0.2605), CGPoint(x: 0.3827, y: 0.2656), CGPoint(x: 0.3629, y: 0.2656), CGPoint(x: 0.3431, y: 0.2656), CGPoint(x: 0.3232, y: 0.2656), CGPoint(x: 0.3034, y: 0.2656), CGPoint(x: 0.2836, y: 0.2656), CGPoint(x: 0.2638, y: 0.2656), CGPoint(x: 0.2439, y: 0.2656), CGPoint(x: 0.2241, y: 0.2656), CGPoint(x: 0.2043, y: 0.2656), CGPoint(x: 0.1845, y: 0.2656), CGPoint(x: 0.1719, y: 0.2584), CGPoint(x: 0.1719, y: 0.2386), CGPoint(x: 0.1719, y: 0.2188)],
+        [CGPoint(x: 0.8281, y: 0.7656), CGPoint(x: 0.8084, y: 0.7656), CGPoint(x: 0.7888, y: 0.7656), CGPoint(x: 0.7691, y: 0.7656), CGPoint(x: 0.7494, y: 0.7656), CGPoint(x: 0.7297, y: 0.7656), CGPoint(x: 0.7101, y: 0.7656), CGPoint(x: 0.6904, y: 0.7656), CGPoint(x: 0.6707, y: 0.7656), CGPoint(x: 0.651, y: 0.7656), CGPoint(x: 0.6314, y: 0.7656), CGPoint(x: 0.6117, y: 0.7656), CGPoint(x: 0.592, y: 0.7656), CGPoint(x: 0.5723, y: 0.7656), CGPoint(x: 0.5527, y: 0.7656), CGPoint(x: 0.533, y: 0.7656), CGPoint(x: 0.5133, y: 0.7656), CGPoint(x: 0.4936, y: 0.7656), CGPoint(x: 0.474, y: 0.7656), CGPoint(x: 0.4543, y: 0.7656), CGPoint(x: 0.4346, y: 0.7656), CGPoint(x: 0.4149, y: 0.7656), CGPoint(x: 0.3953, y: 0.7656), CGPoint(x: 0.3756, y: 0.7656), CGPoint(x: 0.3559, y: 0.7656), CGPoint(x: 0.3362, y: 0.7656), CGPoint(x: 0.3166, y: 0.7656), CGPoint(x: 0.2969, y: 0.7656), CGPoint(x: 0.2772, y: 0.7656), CGPoint(x: 0.2575, y: 0.7656), CGPoint(x: 0.2378, y: 0.7656), CGPoint(x: 0.2182, y: 0.7656), CGPoint(x: 0.1985, y: 0.7656), CGPoint(x: 0.1788, y: 0.7656), CGPoint(x: 0.1719, y: 0.7529), CGPoint(x: 0.1719, y: 0.7332), CGPoint(x: 0.1719, y: 0.7135), CGPoint(x: 0.1719, y: 0.6939), CGPoint(x: 0.1719, y: 0.6742), CGPoint(x: 0.1719, y: 0.6545), CGPoint(x: 0.1719, y: 0.6348), CGPoint(x: 0.1719, y: 0.6152), CGPoint(x: 0.1719, y: 0.5955), CGPoint(x: 0.1719, y: 0.5758), CGPoint(x: 0.1719, y: 0.5561), CGPoint(x: 0.1719, y: 0.5365), CGPoint(x: 0.1719, y: 0.5168), CGPoint(x: 0.1719, y: 0.4971), CGPoint(x: 0.1719, y: 0.4774), CGPoint(x: 0.1719, y: 0.4578), CGPoint(x: 0.1719, y: 0.4381), CGPoint(x: 0.1719, y: 0.4184), CGPoint(x: 0.1719, y: 0.3987), CGPoint(x: 0.1719, y: 0.3791), CGPoint(x: 0.1719, y: 0.3594), CGPoint(x: 0.1916, y: 0.3594), CGPoint(x: 0.2112, y: 0.3594), CGPoint(x: 0.2309, y: 0.3594), CGPoint(x: 0.2506, y: 0.3594), CGPoint(x: 0.2703, y: 0.3594), CGPoint(x: 0.2899, y: 0.3594), CGPoint(x: 0.3096, y: 0.3594), CGPoint(x: 0.3293, y: 0.3594), CGPoint(x: 0.349, y: 0.3594), CGPoint(x: 0.3686, y: 0.3594), CGPoint(x: 0.3883, y: 0.3594), CGPoint(x: 0.408, y: 0.3594), CGPoint(x: 0.4277, y: 0.3594), CGPoint(x: 0.4473, y: 0.3594), CGPoint(x: 0.467, y: 0.3594), CGPoint(x: 0.4867, y: 0.3594), CGPoint(x: 0.5064, y: 0.3594), CGPoint(x: 0.526, y: 0.3594), CGPoint(x: 0.5457, y: 0.3594), CGPoint(x: 0.5654, y: 0.3594), CGPoint(x: 0.5851, y: 0.3594), CGPoint(x: 0.6047, y: 0.3594), CGPoint(x: 0.6244, y: 0.3594), CGPoint(x: 0.6441, y: 0.3594), CGPoint(x: 0.6638, y: 0.3594), CGPoint(x: 0.6834, y: 0.3594), CGPoint(x: 0.7031, y: 0.3594), CGPoint(x: 0.7228, y: 0.3594), CGPoint(x: 0.7425, y: 0.3594), CGPoint(x: 0.7622, y: 0.3594), CGPoint(x: 0.7818, y: 0.3594), CGPoint(x: 0.8015, y: 0.3594), CGPoint(x: 0.8212, y: 0.3594), CGPoint(x: 0.8281, y: 0.3721), CGPoint(x: 0.8281, y: 0.3918), CGPoint(x: 0.8281, y: 0.4115), CGPoint(x: 0.8281, y: 0.4311), CGPoint(x: 0.8281, y: 0.4508), CGPoint(x: 0.8281, y: 0.4705), CGPoint(x: 0.8281, y: 0.4902), CGPoint(x: 0.8281, y: 0.5098), CGPoint(x: 0.8281, y: 0.5295), CGPoint(x: 0.8281, y: 0.5492), CGPoint(x: 0.8281, y: 0.5689), CGPoint(x: 0.8281, y: 0.5885), CGPoint(x: 0.8281, y: 0.6082), CGPoint(x: 0.8281, y: 0.6279), CGPoint(x: 0.8281, y: 0.6476), CGPoint(x: 0.8281, y: 0.6672), CGPoint(x: 0.8281, y: 0.6869), CGPoint(x: 0.8281, y: 0.7066), CGPoint(x: 0.8281, y: 0.7263), CGPoint(x: 0.8281, y: 0.7459), CGPoint(x: 0.8281, y: 0.7656)],
+    ]
+
+    private static let open: [[CGPoint]] = [
+        [CGPoint(x: 0.9696, y: 0.4387), CGPoint(x: 0.9563, y: 0.4244), CGPoint(x: 0.9398, y: 0.4138), CGPoint(x: 0.9212, y: 0.4077), CGPoint(x: 0.9016, y: 0.4062), CGPoint(x: 0.882, y: 0.4062), CGPoint(x: 0.8623, y: 0.4062), CGPoint(x: 0.8594, y: 0.3895), CGPoint(x: 0.8594, y: 0.3699), CGPoint(x: 0.8594, y: 0.3502), CGPoint(x: 0.8583, y: 0.3306), CGPoint(x: 0.8526, y: 0.3119), CGPoint(x: 0.8424, y: 0.2951), CGPoint(x: 0.8284, y: 0.2814), CGPoint(x: 0.8114, y: 0.2717), CGPoint(x: 0.7925, y: 0.2664), CGPoint(x: 0.7729, y: 0.2656), CGPoint(x: 0.7532, y: 0.2656), CGPoint(x: 0.7336, y: 0.2656), CGPoint(x: 0.7139, y: 0.2656), CGPoint(x: 0.6943, y: 0.2656), CGPoint(x: 0.6746, y: 0.2656), CGPoint(x: 0.655, y: 0.2656), CGPoint(x: 0.6353, y: 0.2656), CGPoint(x: 0.6157, y: 0.2656), CGPoint(x: 0.596, y: 0.2656), CGPoint(x: 0.5764, y: 0.2656), CGPoint(x: 0.5567, y: 0.2656), CGPoint(x: 0.5371, y: 0.2656), CGPoint(x: 0.5174, y: 0.2656), CGPoint(x: 0.5014, y: 0.2549), CGPoint(x: 0.4856, y: 0.2431), CGPoint(x: 0.4699, y: 0.2313), CGPoint(x: 0.4542, y: 0.2195), CGPoint(x: 0.4385, y: 0.2078), CGPoint(x: 0.4228, y: 0.196), CGPoint(x: 0.4069, y: 0.1843), CGPoint(x: 0.3892, y: 0.1759), CGPoint(x: 0.37, y: 0.1721), CGPoint(x: 0.3504, y: 0.1719), CGPoint(x: 0.3307, y: 0.1719), CGPoint(x: 0.3111, y: 0.1719), CGPoint(x: 0.2914, y: 0.1719), CGPoint(x: 0.2718, y: 0.1719), CGPoint(x: 0.2521, y: 0.1719), CGPoint(x: 0.2325, y: 0.1719), CGPoint(x: 0.2128, y: 0.1719), CGPoint(x: 0.1932, y: 0.1719), CGPoint(x: 0.1735, y: 0.1719), CGPoint(x: 0.1539, y: 0.1719), CGPoint(x: 0.1345, y: 0.175), CGPoint(x: 0.1165, y: 0.1827), CGPoint(x: 0.101, y: 0.1947), CGPoint(x: 0.089, y: 0.2102), CGPoint(x: 0.0812, y: 0.2282), CGPoint(x: 0.0782, y: 0.2476), CGPoint(x: 0.0781, y: 0.2672), CGPoint(x: 0.0781, y: 0.2869), CGPoint(x: 0.0781, y: 0.3065), CGPoint(x: 0.0781, y: 0.3262), CGPoint(x: 0.0781, y: 0.3458), CGPoint(x: 0.0781, y: 0.3655), CGPoint(x: 0.0781, y: 0.3851), CGPoint(x: 0.0781, y: 0.4048), CGPoint(x: 0.0781, y: 0.4244), CGPoint(x: 0.0781, y: 0.4441), CGPoint(x: 0.0781, y: 0.4637), CGPoint(x: 0.0781, y: 0.4834), CGPoint(x: 0.0781, y: 0.503), CGPoint(x: 0.0781, y: 0.5227), CGPoint(x: 0.0781, y: 0.5423), CGPoint(x: 0.0781, y: 0.562), CGPoint(x: 0.0781, y: 0.5816), CGPoint(x: 0.0781, y: 0.6013), CGPoint(x: 0.0781, y: 0.6209), CGPoint(x: 0.0781, y: 0.6406), CGPoint(x: 0.0781, y: 0.6602), CGPoint(x: 0.0781, y: 0.6799), CGPoint(x: 0.0781, y: 0.6995), CGPoint(x: 0.0781, y: 0.7192), CGPoint(x: 0.0781, y: 0.7388), CGPoint(x: 0.0781, y: 0.7585), CGPoint(x: 0.0781, y: 0.7781), CGPoint(x: 0.0781, y: 0.7978), CGPoint(x: 0.0784, y: 0.8174), CGPoint(x: 0.0844, y: 0.836), CGPoint(x: 0.0975, y: 0.8505), CGPoint(x: 0.1153, y: 0.8584), CGPoint(x: 0.1349, y: 0.8594), CGPoint(x: 0.1546, y: 0.8594), CGPoint(x: 0.1742, y: 0.8594), CGPoint(x: 0.1939, y: 0.8594), CGPoint(x: 0.2135, y: 0.8594), CGPoint(x: 0.2332, y: 0.8594), CGPoint(x: 0.2528, y: 0.8594), CGPoint(x: 0.2725, y: 0.8594), CGPoint(x: 0.2921, y: 0.8594), CGPoint(x: 0.3118, y: 0.8594), CGPoint(x: 0.3314, y: 0.8594), CGPoint(x: 0.3511, y: 0.8594), CGPoint(x: 0.3707, y: 0.8594), CGPoint(x: 0.3904, y: 0.8594), CGPoint(x: 0.41, y: 0.8594), CGPoint(x: 0.4297, y: 0.8594), CGPoint(x: 0.4493, y: 0.8594), CGPoint(x: 0.469, y: 0.8594), CGPoint(x: 0.4886, y: 0.8594), CGPoint(x: 0.5083, y: 0.8594), CGPoint(x: 0.5279, y: 0.8594), CGPoint(x: 0.5476, y: 0.8594), CGPoint(x: 0.5672, y: 0.8594), CGPoint(x: 0.5869, y: 0.8594), CGPoint(x: 0.6065, y: 0.8594), CGPoint(x: 0.6262, y: 0.8594), CGPoint(x: 0.6458, y: 0.8594), CGPoint(x: 0.6655, y: 0.8594), CGPoint(x: 0.6851, y: 0.8594), CGPoint(x: 0.7048, y: 0.8594), CGPoint(x: 0.7244, y: 0.8594), CGPoint(x: 0.7441, y: 0.8594), CGPoint(x: 0.7637, y: 0.8594), CGPoint(x: 0.7834, y: 0.8594), CGPoint(x: 0.803, y: 0.8594), CGPoint(x: 0.8227, y: 0.8594), CGPoint(x: 0.8419, y: 0.8561), CGPoint(x: 0.8582, y: 0.8453), CGPoint(x: 0.8686, y: 0.8288), CGPoint(x: 0.8751, y: 0.8103), CGPoint(x: 0.8816, y: 0.7917), CGPoint(x: 0.8881, y: 0.7732), CGPoint(x: 0.8946, y: 0.7546), CGPoint(x: 0.9011, y: 0.7361), CGPoint(x: 0.9075, y: 0.7175), CGPoint(x: 0.914, y: 0.699), CGPoint(x: 0.9205, y: 0.6804), CGPoint(x: 0.927, y: 0.6619), CGPoint(x: 0.9335, y: 0.6433), CGPoint(x: 0.94, y: 0.6248), CGPoint(x: 0.9465, y: 0.6062), CGPoint(x: 0.9529, y: 0.5877), CGPoint(x: 0.9594, y: 0.5691), CGPoint(x: 0.9659, y: 0.5506), CGPoint(x: 0.9724, y: 0.5321), CGPoint(x: 0.9789, y: 0.5135), CGPoint(x: 0.9838, y: 0.4945), CGPoint(x: 0.9838, y: 0.4749), CGPoint(x: 0.979, y: 0.4559), CGPoint(x: 0.9696, y: 0.4387)],
+        [CGPoint(x: 0.3594, y: 0.2656), CGPoint(x: 0.3751, y: 0.2774), CGPoint(x: 0.3908, y: 0.2892), CGPoint(x: 0.4066, y: 0.301), CGPoint(x: 0.4223, y: 0.3128), CGPoint(x: 0.438, y: 0.3246), CGPoint(x: 0.4537, y: 0.3364), CGPoint(x: 0.4695, y: 0.3482), CGPoint(x: 0.4867, y: 0.3574), CGPoint(x: 0.5062, y: 0.3594), CGPoint(x: 0.5258, y: 0.3594), CGPoint(x: 0.5455, y: 0.3594), CGPoint(x: 0.5651, y: 0.3594), CGPoint(x: 0.5848, y: 0.3594), CGPoint(x: 0.6045, y: 0.3594), CGPoint(x: 0.6241, y: 0.3594), CGPoint(x: 0.6438, y: 0.3594), CGPoint(x: 0.6634, y: 0.3594), CGPoint(x: 0.6831, y: 0.3594), CGPoint(x: 0.7028, y: 0.3594), CGPoint(x: 0.7224, y: 0.3594), CGPoint(x: 0.7421, y: 0.3594), CGPoint(x: 0.7617, y: 0.3594), CGPoint(x: 0.7656, y: 0.3751), CGPoint(x: 0.7656, y: 0.3948), CGPoint(x: 0.7574, y: 0.4062), CGPoint(x: 0.7377, y: 0.4062), CGPoint(x: 0.7181, y: 0.4062), CGPoint(x: 0.6984, y: 0.4062), CGPoint(x: 0.6788, y: 0.4062), CGPoint(x: 0.6591, y: 0.4062), CGPoint(x: 0.6394, y: 0.4062), CGPoint(x: 0.6198, y: 0.4062), CGPoint(x: 0.6001, y: 0.4062), CGPoint(x: 0.5805, y: 0.4062), CGPoint(x: 0.5608, y: 0.4062), CGPoint(x: 0.5411, y: 0.4062), CGPoint(x: 0.5215, y: 0.4062), CGPoint(x: 0.5018, y: 0.4062), CGPoint(x: 0.4822, y: 0.4062), CGPoint(x: 0.4625, y: 0.4062), CGPoint(x: 0.4428, y: 0.4062), CGPoint(x: 0.4232, y: 0.4062), CGPoint(x: 0.4035, y: 0.4062), CGPoint(x: 0.3839, y: 0.4062), CGPoint(x: 0.3642, y: 0.4062), CGPoint(x: 0.3445, y: 0.4062), CGPoint(x: 0.3249, y: 0.4062), CGPoint(x: 0.3052, y: 0.4062), CGPoint(x: 0.2856, y: 0.4062), CGPoint(x: 0.2659, y: 0.4065), CGPoint(x: 0.2467, y: 0.4106), CGPoint(x: 0.2292, y: 0.4194), CGPoint(x: 0.2144, y: 0.4322), CGPoint(x: 0.2032, y: 0.4484), CGPoint(x: 0.196, y: 0.4666), CGPoint(x: 0.1895, y: 0.4852), CGPoint(x: 0.183, y: 0.5037), CGPoint(x: 0.1766, y: 0.5223), CGPoint(x: 0.1719, y: 0.5303), CGPoint(x: 0.1719, y: 0.5107), CGPoint(x: 0.1719, y: 0.491), CGPoint(x: 0.1719, y: 0.4713), CGPoint(x: 0.1719, y: 0.4517), CGPoint(x: 0.1719, y: 0.432), CGPoint(x: 0.1719, y: 0.4123), CGPoint(x: 0.1719, y: 0.3927), CGPoint(x: 0.1719, y: 0.373), CGPoint(x: 0.1719, y: 0.3534), CGPoint(x: 0.1719, y: 0.3337), CGPoint(x: 0.1719, y: 0.314), CGPoint(x: 0.1719, y: 0.2944), CGPoint(x: 0.1719, y: 0.2747), CGPoint(x: 0.1824, y: 0.2656), CGPoint(x: 0.2021, y: 0.2656), CGPoint(x: 0.2218, y: 0.2656), CGPoint(x: 0.2414, y: 0.2656), CGPoint(x: 0.2611, y: 0.2656), CGPoint(x: 0.2807, y: 0.2656), CGPoint(x: 0.3004, y: 0.2656), CGPoint(x: 0.3201, y: 0.2656), CGPoint(x: 0.3397, y: 0.2656), CGPoint(x: 0.3594, y: 0.2656)],
+        [CGPoint(x: 0.7914, y: 0.7656), CGPoint(x: 0.7718, y: 0.7656), CGPoint(x: 0.7522, y: 0.7656), CGPoint(x: 0.7326, y: 0.7656), CGPoint(x: 0.713, y: 0.7656), CGPoint(x: 0.6934, y: 0.7656), CGPoint(x: 0.6738, y: 0.7656), CGPoint(x: 0.6542, y: 0.7656), CGPoint(x: 0.6346, y: 0.7656), CGPoint(x: 0.615, y: 0.7656), CGPoint(x: 0.5954, y: 0.7656), CGPoint(x: 0.5758, y: 0.7656), CGPoint(x: 0.5562, y: 0.7656), CGPoint(x: 0.5366, y: 0.7656), CGPoint(x: 0.517, y: 0.7656), CGPoint(x: 0.4974, y: 0.7656), CGPoint(x: 0.4778, y: 0.7656), CGPoint(x: 0.4582, y: 0.7656), CGPoint(x: 0.4386, y: 0.7656), CGPoint(x: 0.419, y: 0.7656), CGPoint(x: 0.3994, y: 0.7656), CGPoint(x: 0.3798, y: 0.7656), CGPoint(x: 0.3602, y: 0.7656), CGPoint(x: 0.3406, y: 0.7656), CGPoint(x: 0.321, y: 0.7656), CGPoint(x: 0.3014, y: 0.7656), CGPoint(x: 0.2818, y: 0.7656), CGPoint(x: 0.2622, y: 0.7656), CGPoint(x: 0.2426, y: 0.7656), CGPoint(x: 0.2231, y: 0.7656), CGPoint(x: 0.2035, y: 0.7656), CGPoint(x: 0.1933, y: 0.7589), CGPoint(x: 0.1998, y: 0.7404), CGPoint(x: 0.2062, y: 0.7219), CGPoint(x: 0.2127, y: 0.7034), CGPoint(x: 0.2191, y: 0.6849), CGPoint(x: 0.2256, y: 0.6664), CGPoint(x: 0.232, y: 0.6479), CGPoint(x: 0.2385, y: 0.6294), CGPoint(x: 0.245, y: 0.6109), CGPoint(x: 0.2514, y: 0.5924), CGPoint(x: 0.2579, y: 0.5739), CGPoint(x: 0.2643, y: 0.5554), CGPoint(x: 0.2708, y: 0.5369), CGPoint(x: 0.2772, y: 0.5184), CGPoint(x: 0.2838, y: 0.5), CGPoint(x: 0.3034, y: 0.5), CGPoint(x: 0.323, y: 0.5), CGPoint(x: 0.3426, y: 0.5), CGPoint(x: 0.3622, y: 0.5), CGPoint(x: 0.3818, y: 0.5), CGPoint(x: 0.4014, y: 0.5), CGPoint(x: 0.421, y: 0.5), CGPoint(x: 0.4406, y: 0.5), CGPoint(x: 0.4602, y: 0.5), CGPoint(x: 0.4798, y: 0.5), CGPoint(x: 0.4994, y: 0.5), CGPoint(x: 0.519, y: 0.5), CGPoint(x: 0.5386, y: 0.5), CGPoint(x: 0.5581, y: 0.5), CGPoint(x: 0.5777, y: 0.5), CGPoint(x: 0.5973, y: 0.5), CGPoint(x: 0.6169, y: 0.5), CGPoint(x: 0.6365, y: 0.5), CGPoint(x: 0.6561, y: 0.5), CGPoint(x: 0.6757, y: 0.5), CGPoint(x: 0.6953, y: 0.5), CGPoint(x: 0.7149, y: 0.5), CGPoint(x: 0.7345, y: 0.5), CGPoint(x: 0.7541, y: 0.5), CGPoint(x: 0.7737, y: 0.5), CGPoint(x: 0.7933, y: 0.5), CGPoint(x: 0.8129, y: 0.5), CGPoint(x: 0.8325, y: 0.5), CGPoint(x: 0.8521, y: 0.5), CGPoint(x: 0.8717, y: 0.5), CGPoint(x: 0.8819, y: 0.5066), CGPoint(x: 0.8755, y: 0.5251), CGPoint(x: 0.869, y: 0.5436), CGPoint(x: 0.8625, y: 0.5621), CGPoint(x: 0.8561, y: 0.5806), CGPoint(x: 0.8496, y: 0.5991), CGPoint(x: 0.8431, y: 0.6176), CGPoint(x: 0.8367, y: 0.6361), CGPoint(x: 0.8302, y: 0.6546), CGPoint(x: 0.8237, y: 0.6731), CGPoint(x: 0.8172, y: 0.6916), CGPoint(x: 0.8108, y: 0.7101), CGPoint(x: 0.8043, y: 0.7286), CGPoint(x: 0.7978, y: 0.7471), CGPoint(x: 0.7914, y: 0.7656)],
+    ]
+}
+
+// MARK: - Space indicators
+
+private struct SpaceIndicatorBar: View {
+    @ObservedObject var store: TerminalSessionStore
+    let onEdit: (SidebarSpace) -> Void
+    let onCreate: () -> Void
+
+    @State private var hoveredSpaceID: SidebarSpace.ID?
+    @State private var plusHovered = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Spacer(minLength: 0)
+
+            ForEach(store.spaces) { space in
+                let isActive = store.activeSpaceID == space.id
+                let isHovered = hoveredSpaceID == space.id
+                Button {
+                    withAnimation(.spring(duration: 0.32, bounce: 0.12)) {
+                        store.setActiveSpace(space.id)
+                    }
+                } label: {
+                    SpaceIndicatorIcon(icon: space.icon, isActive: isActive, size: 18)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            Circle().fill(Color.white.opacity(isHovered ? 0.1 : 0))
+                        )
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    if hovering {
+                        hoveredSpaceID = space.id
+                    } else if hoveredSpaceID == space.id {
+                        hoveredSpaceID = nil
+                    }
+                }
+                .help(space.name)
+                .contextMenu {
+                    Button("Edit Space…", systemImage: "pencil") {
+                        onEdit(space)
+                    }
+                    Button("Delete Space", systemImage: "trash") {
+                        store.deleteSpace(space.id)
+                    }
+                    .disabled(store.spaces.count == 1)
+                }
+            }
+
+            Button(action: onCreate) {
+                Image(systemName: "plus")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white.opacity(plusHovered ? 0.7 : 0.3))
+                    .frame(width: 24, height: 24)
+                    .background(
+                        Circle().fill(Color.white.opacity(plusHovered ? 0.1 : 0))
+                    )
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .onHover { plusHovered = $0 }
+            .help("New Space (or swipe past the last space)")
+
+            Spacer(minLength: 0)
+        }
+        .frame(height: 30)
+        .padding(.bottom, 6)
+    }
+}
+
+private struct SpaceIndicatorIcon: View {
+    let icon: SidebarSpace.Icon
+    let isActive: Bool
+    var size: CGFloat = 18
+
+    var body: some View {
+        switch icon {
+        case .dot:
+            Circle()
+                .fill(.white.opacity(isActive ? 0.85 : 0.25))
+                .frame(width: size * 0.36, height: size * 0.36)
+        case .symbol(let name):
+            Image(systemName: name)
+                .font(.system(size: size * 0.61, weight: .medium))
+                .foregroundStyle(.white.opacity(isActive ? 0.9 : 0.3))
+        case .emoji(let emoji):
+            Text(emoji)
+                .font(.system(size: size * 0.67))
+                .opacity(isActive ? 1 : 0.4)
+        }
+    }
+}
+
+// MARK: - Space editor
+
+struct SpaceEditorSheet: View {
+    enum Mode: Equatable {
+        case create
+        case edit(SidebarSpace)
+    }
+
+    let mode: Mode
+    let onSave: (String, SidebarSpace.Icon) -> Void
+    let onDismiss: () -> Void
+
+    @State private var name = ""
+    @State private var icon: SidebarSpace.Icon = .symbol("house.fill")
+    @State private var showIconPicker = false
+    @State private var iconHovered = false
+    @State private var closeHovered = false
+    @FocusState private var nameFocused: Bool
+
+    static let symbols = [
+        "house.fill", "terminal", "hammer.fill", "wrench.and.screwdriver.fill",
+        "folder.fill", "globe", "server.rack", "cpu",
+        "bolt.fill", "flame.fill", "leaf.fill", "star.fill",
+        "heart.fill", "book.fill", "graduationcap.fill", "briefcase.fill",
+        "gamecontroller.fill", "music.note", "paintbrush.fill", "camera.fill",
+        "cart.fill", "airplane", "moon.stars.fill", "sparkles"
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Big tappable icon; click to pick, shuffle for serendipity.
+            ZStack(alignment: .bottomTrailing) {
+                Button {
+                    showIconPicker = true
+                } label: {
+                    ZStack {
+                        // Recessed well so the tappable icon area reads as
+                        // a distinct circle; brightens slightly on hover.
+                        Circle()
+                            .fill(Color.black.opacity(iconHovered ? 0.45 : 0.32))
+                        SpaceIndicatorIcon(icon: icon, isActive: true, size: 46)
+                    }
+                    .frame(width: 84, height: 84)
+                    .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .onHover { iconHovered = $0 }
+                .help("Choose an icon")
+                .popover(isPresented: $showIconPicker, arrowEdge: .bottom) {
+                    IconPickerPopover(icon: $icon)
+                }
+
+                Button {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        icon = .symbol(Self.symbols.randomElement() ?? "sparkles")
+                    }
+                } label: {
+                    Image(systemName: "shuffle")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color.black.opacity(0.8))
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Color.white.opacity(0.94)))
+                }
+                .buttonStyle(.plain)
+                .help("Shuffle icon")
+            }
+            .padding(.top, 38)
+            .padding(.bottom, 16)
+
+            Text(isCreating ? "Create a Space" : "Edit Space")
+                .font(.system(size: 17, weight: .semibold))
+                .padding(.bottom, 6)
+
+            Text("A space is its own page of tabs — one per project, client, or mood. Swipe the sidebar to move between them.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 44)
+                .padding(.bottom, 24)
+
+            TextField("Name your space", text: $name)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
+                .focused($nameFocused)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.white.opacity(nameFocused ? 0.12 : 0.06))
+                )
+                .onSubmit(saveAndDismiss)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 28)
+
+            // Bottom-aligned footer, web-modal style: two equal-width
+            // solid buttons spanning the sheet.
+            HStack(spacing: 8) {
+                Button("Cancel") {
+                    onDismiss()
+                }
+                .buttonStyle(ModalSecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+
+                Button {
+                    saveAndDismiss()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isCreating ? "plus" : "checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                        Text(isCreating ? "Create Space" : "Save")
+                    }
+                }
+                .buttonStyle(ModalPrimaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+        }
+        .frame(width: 420)
+        .overlay(alignment: .topTrailing) {
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(closeHovered ? 0.85 : 0.45))
+                    .frame(width: 30, height: 30)
+                    .background(
+                        Circle().fill(Color.white.opacity(closeHovered ? 0.08 : 0))
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { closeHovered = $0 }
+            .padding(10)
+        }
+        // Fully owned chrome: presented as an in-window overlay, not a
+        // macOS sheet, so no system border or forced corner radius.
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(red: 0.094, green: 0.096, blue: 0.105))
+                .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
+                .shadow(color: .black.opacity(0.65), radius: 70, y: 30)
+        )
+        .onAppear {
+            if case .edit(let space) = mode {
+                name = space.name
+                icon = space.icon
+            } else {
+                icon = .symbol(Self.symbols.prefix(4).randomElement() ?? "house.fill")
+                nameFocused = true
+            }
+        }
+    }
+
+    private func saveAndDismiss() {
+        onSave(name, icon)
+        onDismiss()
+    }
+
+    private var isCreating: Bool {
+        if case .create = mode { return true }
+        return false
+    }
+}
+
+private struct IconPickerPopover: View {
+    @Binding var icon: SidebarSpace.Icon
+    @State private var emoji = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(30)), count: 6), spacing: 4) {
+                ForEach(SpaceEditorSheet.symbols, id: \.self) { symbol in
+                    Button {
+                        icon = .symbol(symbol)
+                    } label: {
+                        Image(systemName: symbol)
+                            .font(.system(size: 13))
+                            .frame(width: 28, height: 26)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(icon == .symbol(symbol) ? Color.accentColor.opacity(0.4) : Color.clear)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: 8) {
+                TextField("Or an emoji…", text: $emoji)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: emoji) { _, value in
+                        guard let last = value.last else { return }
+                        emoji = String(last)
+                        icon = .emoji(String(last))
+                    }
+
+                Button("Plain dot") {
+                    icon = .dot
+                }
+                .font(.system(size: 11))
+            }
+        }
+        .padding(12)
+        .frame(width: 220)
+    }
+}
+
+// MARK: - Button styles
+
+/// Solid white primary action, web-modal style: full-width rounded
+/// rectangle, dark label, no gradient or border. Brightens on hover.
+struct ModalPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Styled(configuration: configuration)
+    }
+
+    private struct Styled: View {
+        let configuration: Configuration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.88))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.white.opacity(
+                            configuration.isPressed ? 0.78 : (hovering ? 1 : 0.9)
+                        ))
+                )
+                .onHover { hovering = $0 }
+                .animation(.snappy(duration: 0.12), value: configuration.isPressed)
+        }
+    }
+}
+
+/// Muted gray secondary action matching the primary's geometry.
+struct ModalSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Styled(configuration: configuration)
+    }
+
+    private struct Styled: View {
+        let configuration: Configuration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(hovering ? 0.92 : 0.8))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.white.opacity(
+                            configuration.isPressed ? 0.16 : (hovering ? 0.13 : 0.09)
+                        ))
+                )
+                .onHover { hovering = $0 }
+                .animation(.snappy(duration: 0.12), value: configuration.isPressed)
+        }
+    }
+}
+
+private struct RenameFolderSheet: View {
+    @Binding var title: String
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename Folder")
+                .font(.headline)
+
+            TextField("Folder name", text: $title)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 320)
+
+            HStack(spacing: 8) {
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(ModalSecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Button("Save", action: onSave)
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+    }
+}
+
+#Preview {
+    SidebarView(store: .preview, spaceEditor: .constant(nil))
+        .frame(width: 264, height: 600)
+        .background(.black)
+}

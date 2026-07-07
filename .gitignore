@@ -2,7 +2,7 @@ build/
 DerivedData/
 *.xcuserstate
 *.xcuserdata/
-cmux-alternative.xcodeproj/xcuserdata/
+Bloom.xcodeproj/xcuserdata/
 references/
 GhosttyKit.xcframework
 default.profraw
