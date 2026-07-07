@@ -3,7 +3,6 @@
   <h1>Bloom</h1>
   <p><strong>A macOS terminal built for the agent era.</strong></p>
   <p>
-    <a href="https://github.com/amanfromsolan/bloom/releases/latest"><img src="https://img.shields.io/github/v/release/amanfromsolan/bloom?label=download&color=b18cff" alt="Latest release" /></a>
     <img src="https://img.shields.io/badge/platform-macOS-6fa8ff" alt="macOS" />
     <img src="https://img.shields.io/badge/built%20on-libghostty-ff7eb6" alt="libghostty" />
     <img src="https://img.shields.io/badge/Swift-SwiftUI-ffb454" alt="SwiftUI" />
