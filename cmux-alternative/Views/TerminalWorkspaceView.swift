@@ -20,7 +20,7 @@ struct TerminalWorkspaceView: View {
                     GhosttyTerminalHostView(session: session, store: store)
                         .id(session.id)
                 }
-                .background(Color(red: 0.018, green: 0.019, blue: 0.023))
+                .background(GhosttyRuntime.shared.themeBackground)
                 .sheet(isPresented: $isRenaming) {
                     RenameSessionSheet(
                         title: $draftTitle,
@@ -40,7 +40,7 @@ struct TerminalWorkspaceView: View {
                     description: Text("Press ⌘T to open a new tab.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(red: 0.018, green: 0.019, blue: 0.023))
+                .background(GhosttyRuntime.shared.themeBackground)
             }
         }
     }

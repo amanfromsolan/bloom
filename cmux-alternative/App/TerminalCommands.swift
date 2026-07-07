@@ -20,9 +20,9 @@ struct TerminalCommands: Commands {
             Button(pinTitle) {
                 guard let selection = store.selection else { return }
                 if store.isPinned(selection) {
-                    store.unpin([selection])
+                    store.unpin([selection], inSpace: store.activeSpaceID)
                 } else {
-                    store.pin([selection])
+                    store.pin([selection], inSpace: store.activeSpaceID)
                 }
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])

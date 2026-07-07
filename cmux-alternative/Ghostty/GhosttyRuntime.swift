@@ -1,5 +1,6 @@
 import AppKit
 import GhosttyKit
+import SwiftUI
 
 /// Owns the single libghostty app instance: global init, config loading,
 /// runtime callbacks, and the main-thread tick loop driven by ghostty wakeups.
@@ -11,6 +12,10 @@ final class GhosttyRuntime {
 
     nonisolated(unsafe) private(set) var app: ghostty_app_t?
     nonisolated(unsafe) private var config: ghostty_config_t?
+
+    /// Terminal background from the loaded ghostty config, so surrounding
+    /// chrome (title strip, empty states) blends with the terminal theme.
+    private(set) var themeBackground: Color = Color(red: 0.018, green: 0.019, blue: 0.023)
 
     nonisolated private let tickLock = NSLock()
     nonisolated(unsafe) private var tickScheduled = false
@@ -116,7 +121,8 @@ final class GhosttyRuntime {
             return
         }
 
-        ghostty_app_set_focus(app, NSApp.isActive)
+        // NSApp is nil when started from App.init, before NSApplication exists.
+        ghostty_app_set_focus(app, NSApp?.isActive ?? true)
         installObservers()
     }
 
@@ -126,6 +132,17 @@ final class GhosttyRuntime {
         ghostty_config_load_default_files(config)
         ghostty_config_load_recursive_files(config)
         ghostty_config_finalize(config)
+
+        var background = ghostty_config_color_s()
+        let key = "background"
+        if key.withCString({ ghostty_config_get(config, &background, $0, UInt(key.utf8.count)) }) {
+            themeBackground = Color(
+                red: Double(background.r) / 255,
+                green: Double(background.g) / 255,
+                blue: Double(background.b) / 255
+            )
+        }
+
         return config
     }
 

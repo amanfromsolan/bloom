@@ -1,6 +1,45 @@
 import Foundation
 import SwiftUI
 
+/// One swipeable sidebar page: its own pinned/ephemeral tabs and folders.
+struct SidebarSpace: Identifiable, Hashable, Codable {
+    enum Icon: Hashable, Codable {
+        case dot
+        case symbol(String)
+        case emoji(String)
+    }
+
+    let id: UUID
+    var name: String
+    var icon: Icon
+    var pinnedFolders: [TerminalFolder]
+    var pinnedSessions: [TerminalSession]
+    var ephemeralSessions: [TerminalSession]
+    var lastSelection: TerminalSession.ID?
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        icon: Icon = .dot,
+        pinnedFolders: [TerminalFolder] = [],
+        pinnedSessions: [TerminalSession] = [],
+        ephemeralSessions: [TerminalSession] = [],
+        lastSelection: TerminalSession.ID? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.icon = icon
+        self.pinnedFolders = pinnedFolders
+        self.pinnedSessions = pinnedSessions
+        self.ephemeralSessions = ephemeralSessions
+        self.lastSelection = lastSelection
+    }
+
+    var sessions: [TerminalSession] {
+        pinnedSessions + pinnedFolders.flatMap(\.sessions) + ephemeralSessions
+    }
+}
+
 struct TerminalFolder: Identifiable, Hashable, Codable {
     let id: UUID
     var title: String

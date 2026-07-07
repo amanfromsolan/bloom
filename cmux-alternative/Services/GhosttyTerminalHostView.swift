@@ -8,7 +8,7 @@ struct GhosttyTerminalHostView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
         container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor(red: 0.018, green: 0.019, blue: 0.023, alpha: 1).cgColor
+        container.layer?.backgroundColor = NSColor(GhosttyRuntime.shared.themeBackground).cgColor
         return container
     }
 

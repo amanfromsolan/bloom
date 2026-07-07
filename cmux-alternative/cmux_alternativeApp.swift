@@ -11,6 +11,11 @@ import SwiftUI
 struct cmux_alternativeApp: App {
     @StateObject private var sessionStore = TerminalSessionStore()
 
+    init() {
+        // Start libghostty before any view reads the theme background.
+        GhosttyRuntime.shared.ensureStarted()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView(store: sessionStore)

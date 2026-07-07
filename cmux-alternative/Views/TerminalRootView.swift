@@ -16,18 +16,24 @@ struct TerminalRootView: View {
                 SidebarView(store: store)
             }
             .frame(width: 248)
-            .background(
-                SidebarMaterial()
-                    .overlay(Color.black.opacity(0.38))
-            )
 
-            Divider()
-                .overlay(Color.white.opacity(0.07))
-
+            // Terminal floats as an inset card on the frosted window.
             TerminalWorkspaceView(store: store)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.45), radius: 16, y: 4)
+                .padding(EdgeInsets(top: 10, leading: 6, bottom: 10, trailing: 10))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            SidebarMaterial()
+                .overlay(Color.black.opacity(0.38))
+                .ignoresSafeArea()
+        )
         .ignoresSafeArea()
         .onAppear {
             restoreSelection()
@@ -50,7 +56,7 @@ struct TerminalRootView: View {
     }
 }
 
-/// Frosted sidebar backdrop that blurs whatever is behind the window.
+/// Frosted backdrop that blurs whatever is behind the window.
 private struct SidebarMaterial: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
