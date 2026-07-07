@@ -1,101 +1,49 @@
 import SwiftUI
 
+/// Slim strip above the terminal that doubles as the window titlebar:
+/// blends into the terminal background, drags the window, double-click renames.
 struct TerminalHeaderView: View {
     let session: TerminalSession
     let onRename: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 6) {
+            Spacer(minLength: 0)
+
             Circle()
-                .fill(session.accent.color)
-                .frame(width: 10, height: 10)
+                .fill(session.accent.color.opacity(0.8))
+                .frame(width: 6, height: 6)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(session.title)
-                        .font(.headline)
-                        .lineLimit(1)
-
-                    StatusPill(status: session.status)
-                }
-
-                HStack(spacing: 8) {
-                    Label(session.workingDirectory, systemImage: "folder")
-
-                    if let branch = session.branch {
-                        Label(branch, systemImage: "point.3.connected.trianglepath.dotted")
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(session.title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.55))
                 .lineLimit(1)
-            }
 
-            Spacer()
+            Text(compactDirectory)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.28))
+                .lineLimit(1)
 
-            Button {
-                onRename()
-            } label: {
-                Label("Rename", systemImage: "pencil")
-            }
-            .labelStyle(.iconOnly)
-            .help("Rename Session")
-
-            Button {
-            } label: {
-                Label("Find", systemImage: "magnifyingglass")
-            }
-            .labelStyle(.iconOnly)
-            .help("Find in Terminal")
-
-            Button {
-            } label: {
-                Label("Split", systemImage: "rectangle.split.2x1")
-            }
-            .labelStyle(.iconOnly)
-            .help("Split Terminal")
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .background(Color(red: 0.035, green: 0.037, blue: 0.044))
-    }
-}
-
-private struct StatusPill: View {
-    let status: TerminalSession.Status
-
-    var body: some View {
-        Text(status.rawValue)
-            .font(.caption2)
-            .foregroundStyle(foregroundStyle)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(backgroundStyle, in: Capsule())
-    }
-
-    private var foregroundStyle: Color {
-        switch status {
-        case .running:
-            .green
-        case .idle:
-            Color.secondary
-        case .attention:
-            .orange
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .gesture(WindowDragGesture())
+        .onTapGesture(count: 2) {
+            onRename()
         }
     }
 
-    private var backgroundStyle: Color {
-        switch status {
-        case .running:
-            .green.opacity(0.14)
-        case .idle:
-            Color.secondary.opacity(0.12)
-        case .attention:
-            .orange.opacity(0.16)
-        }
+    private var compactDirectory: String {
+        let home = NSHomeDirectory()
+        let path = session.workingDirectory
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 }
 
 #Preview {
-    TerminalHeaderView(session: TerminalSessionStore.defaultFolders[0].sessions[0], onRename: {})
+    TerminalHeaderView(session: TerminalSessionStore.preview.sessions[0], onRename: {})
+        .background(.black)
 }

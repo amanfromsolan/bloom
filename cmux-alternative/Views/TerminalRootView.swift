@@ -6,18 +6,29 @@ struct TerminalRootView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SidebarView(store: store)
-                .frame(width: 264)
+            VStack(spacing: 0) {
+                // Clear space for the traffic lights; drags the window.
+                Color.clear
+                    .frame(height: 40)
+                    .contentShape(Rectangle())
+                    .gesture(WindowDragGesture())
+
+                SidebarView(store: store)
+            }
+            .frame(width: 248)
+            .background(
+                SidebarMaterial()
+                    .overlay(Color.black.opacity(0.38))
+            )
 
             Divider()
-                .overlay(Color.white.opacity(0.08))
+                .overlay(Color.white.opacity(0.07))
 
             TerminalWorkspaceView(store: store)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(red: 0.035, green: 0.037, blue: 0.043))
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .ignoresSafeArea()
         .onAppear {
             restoreSelection()
         }
@@ -37,6 +48,19 @@ struct TerminalRootView: View {
 
         store.selection = id
     }
+}
+
+/// Frosted sidebar backdrop that blurs whatever is behind the window.
+private struct SidebarMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 #Preview {

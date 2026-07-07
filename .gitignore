@@ -3,3 +3,6 @@ DerivedData/
 *.xcuserstate
 *.xcuserdata/
 cmux-alternative.xcodeproj/xcuserdata/
+references/
+GhosttyKit.xcframework
+default.profraw

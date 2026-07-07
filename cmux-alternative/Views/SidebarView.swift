@@ -5,137 +5,301 @@ struct SidebarView: View {
     @State private var expandedFolders = Set<TerminalFolder.ID>()
     @State private var folderBeingRenamed: TerminalFolder?
     @State private var draftFolderTitle = ""
+    @State private var sessionBeingRenamed: TerminalSession?
+    @State private var draftSessionTitle = ""
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(store.folders) { folder in
-                        folderSection(folder)
-                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    pinnedZone
+                    zoneDivider
+                    ephemeralZone
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
             }
-
-            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            ZStack {
-                Color(red: 0.055, green: 0.058, blue: 0.068).opacity(0.94)
-                Color.black.opacity(0.18)
-            }
-        )
         .onAppear {
-            expandedFolders.formUnion(store.folders.map(\.id))
+            expandedFolders.formUnion(store.pinnedFolders.map(\.id))
         }
-        .onChange(of: store.folders.map(\.id)) { _, folderIDs in
+        .onChange(of: store.pinnedFolders.map(\.id)) { _, folderIDs in
             expandedFolders.formUnion(folderIDs)
         }
         .sheet(item: $folderBeingRenamed) { folder in
-            RenameFolderSheet(
-                title: $draftFolderTitle,
-                onCancel: {
-                    folderBeingRenamed = nil
-                },
-                onSave: {
-                    store.rename(folder, to: draftFolderTitle)
-                    folderBeingRenamed = nil
-                }
-            )
+            RenameSheet(kind: "Folder", title: $draftFolderTitle) {
+                folderBeingRenamed = nil
+            } onSave: {
+                store.rename(folder, to: draftFolderTitle)
+                folderBeingRenamed = nil
+            }
+        }
+        .sheet(item: $sessionBeingRenamed) { session in
+            RenameSheet(kind: "Tab", title: $draftSessionTitle) {
+                sessionBeingRenamed = nil
+            } onSave: {
+                store.rename(session, to: draftSessionTitle)
+                sessionBeingRenamed = nil
+            }
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 8) {
-            Text("Folders")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.72))
+    // MARK: - Pinned zone (persistent, above the divider)
 
-            Spacer()
-
-            Button {
-                store.createFolder()
-            } label: {
-                Label("New Folder", systemImage: "folder.badge.plus")
+    private var pinnedZone: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("Pinned")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.38))
+                    .textCase(.uppercase)
+                Spacer()
             }
-            .buttonStyle(.plain)
-            .labelStyle(.iconOnly)
-            .foregroundStyle(.white.opacity(0.82))
-            .frame(width: 26, height: 26)
-            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-            .help("New Folder")
+            .padding(.horizontal, 6)
+            .padding(.bottom, 4)
+
+            if store.pinnedSessions.isEmpty && store.pinnedFolders.isEmpty {
+                Text("Drag tabs here to keep them")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.28))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 8)
+            }
+
+            ForEach(store.pinnedSessions) { session in
+                sessionRow(session)
+            }
+
+            ForEach(store.pinnedFolders) { folder in
+                folderSection(folder)
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .dropDestination(for: String.self) { items, _ in
+            store.pin(sessionIDs(from: items))
+            return true
+        }
+    }
+
+    private var zoneDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.1))
+            .frame(height: 1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 8)
+    }
+
+    // MARK: - Ephemeral zone (throwaway tabs, below the divider)
+
+    private var ephemeralZone: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(store.ephemeralSessions) { session in
+                sessionRow(session)
+            }
 
             Button {
                 store.createSession()
             } label: {
-                Label("New Terminal", systemImage: "plus")
+                HStack(spacing: 8) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 14)
+                    Text("New Tab")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.white.opacity(0.45))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .labelStyle(.iconOnly)
-            .foregroundStyle(.white.opacity(0.82))
-            .frame(width: 26, height: 26)
-            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-            .help("New Terminal")
+
+            Spacer(minLength: 120)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        .contentShape(Rectangle())
+        .dropDestination(for: String.self) { items, _ in
+            store.unpin(sessionIDs(from: items))
+            return true
+        }
     }
+
+    // MARK: - Rows
 
     private func folderSection(_ folder: TerminalFolder) -> some View {
         DisclosureGroup(isExpanded: binding(for: folder.id)) {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(folder.sessions) { session in
-                    TerminalSidebarRow(
-                        session: session,
-                        isSelected: store.selection == session.id
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        store.selection = session.id
-                    }
-                    .contextMenu {
-                        Button("Duplicate", systemImage: "plus.square.on.square") {
-                            store.selection = session.id
-                            store.duplicateSelectedSession()
-                        }
+                    sessionRow(session)
+                }
+            }
+            .padding(.top, 2)
+            .padding(.leading, 14)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "folder")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .frame(width: 16)
+                Text(folder.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .contextMenu {
+                Button("Rename Folder", systemImage: "pencil") {
+                    draftFolderTitle = folder.title
+                    folderBeingRenamed = folder
+                }
+                Button("Delete Folder", systemImage: "trash") {
+                    store.deleteFolder(folder.id)
+                }
+            }
+            .dropDestination(for: String.self) { items, _ in
+                store.move(sessionIDs(from: items), toFolder: folder.id)
+                return true
+            }
+        }
+        .tint(.white.opacity(0.4))
+    }
 
-                        Button("Mark Needs Attention", systemImage: "bell.badge") {
-                            store.selection = session.id
-                            store.markSelectedNeedsAttention()
-                        }
+    private func sessionRow(_ session: TerminalSession) -> some View {
+        let isSelected = store.selection == session.id
+        let isMultiSelected = store.multiSelection.contains(session.id)
 
-                        Divider()
+        return HStack(spacing: 8) {
+            Circle()
+                .fill(session.accent.color.opacity(isSelected ? 0.95 : 0.55))
+                .frame(width: 7, height: 7)
+            Text(session.title)
+                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(.white.opacity(isSelected ? 0.95 : 0.62))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            if session.status == .attention {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(
+                    isSelected
+                        ? Color.white.opacity(0.14)
+                        : (isMultiSelected ? Color.white.opacity(0.07) : Color.clear)
+                )
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            handleTap(session)
+        }
+        .draggable(dragPayload(for: session))
+        .contextMenu {
+            contextMenu(for: session)
+        }
+    }
 
-                        Button("Close", systemImage: "xmark") {
-                            store.selection = session.id
-                            store.closeSelectedSession()
-                        }
-                        .disabled(store.sessions.count == 1)
+    @ViewBuilder
+    private func contextMenu(for session: TerminalSession) -> some View {
+        let targets = contextTargets(for: session)
+        let plural = targets.count > 1 ? " \(targets.count) Tabs" : " Tab"
+
+        Button("New Folder with\(plural)", systemImage: "folder.badge.plus") {
+            store.createFolder(with: targets)
+        }
+
+        if !store.pinnedFolders.isEmpty {
+            Menu("Move to Folder") {
+                ForEach(store.pinnedFolders) { folder in
+                    Button(folder.title) {
+                        store.move(targets, toFolder: folder.id)
                     }
                 }
             }
-            .padding(.top, 3)
-            .padding(.leading, 16)
-        } label: {
-            FolderSidebarRow(folder: folder)
-                .contextMenu {
-                    Button("New Terminal", systemImage: "plus") {
-                        store.createSession(in: folder.id)
-                    }
-
-                    Button("Rename Folder", systemImage: "pencil") {
-                        draftFolderTitle = folder.title
-                        folderBeingRenamed = folder
-                    }
-                }
         }
-        .disclosureGroupStyle(.automatic)
-        .tint(.white.opacity(0.46))
+
+        if targets.contains(where: { !store.isPinned($0) }) {
+            Button("Pin\(plural)", systemImage: "pin") {
+                store.pin(targets)
+            }
+        }
+        if targets.contains(where: { store.isPinned($0) }) {
+            Button("Unpin\(plural)", systemImage: "pin.slash") {
+                store.unpin(targets)
+            }
+        }
+
+        if targets.count == 1 {
+            Button("Rename", systemImage: "pencil") {
+                draftSessionTitle = session.title
+                sessionBeingRenamed = session
+            }
+        }
+
+        Divider()
+
+        Button("Close\(plural)", systemImage: "xmark") {
+            store.close(sessionIDs: targets)
+        }
+    }
+
+    // MARK: - Selection handling
+
+    private func handleTap(_ session: TerminalSession) {
+        let flags = NSEvent.modifierFlags
+
+        if flags.contains(.command) {
+            if store.multiSelection.contains(session.id) {
+                store.multiSelection.remove(session.id)
+            } else {
+                store.multiSelection.insert(session.id)
+            }
+            store.selection = session.id
+        } else if flags.contains(.shift), let anchor = store.selection {
+            let order = visibleOrder()
+            if let from = order.firstIndex(of: anchor), let to = order.firstIndex(of: session.id) {
+                store.multiSelection.formUnion(order[min(from, to)...max(from, to)])
+            }
+        } else {
+            store.selection = session.id
+            store.multiSelection = [session.id]
+        }
+    }
+
+    private func contextTargets(for session: TerminalSession) -> Set<TerminalSession.ID> {
+        store.multiSelection.count > 1 && store.multiSelection.contains(session.id)
+            ? store.multiSelection
+            : [session.id]
+    }
+
+    private func visibleOrder() -> [TerminalSession.ID] {
+        var order = store.pinnedSessions.map(\.id)
+        for folder in store.pinnedFolders where expandedFolders.contains(folder.id) {
+            order += folder.sessions.map(\.id)
+        }
+        order += store.ephemeralSessions.map(\.id)
+        return order
+    }
+
+    // MARK: - Drag & drop
+
+    private func dragPayload(for session: TerminalSession) -> String {
+        let ids = contextTargets(for: session)
+        return ids.map(\.uuidString).joined(separator: ",")
+    }
+
+    private func sessionIDs(from items: [String]) -> Set<TerminalSession.ID> {
+        Set(items.flatMap { $0.split(separator: ",") }.compactMap { UUID(uuidString: String($0)) })
     }
 
     private func binding(for folderID: TerminalFolder.ID) -> Binding<Bool> {
@@ -151,68 +315,25 @@ struct SidebarView: View {
     }
 }
 
-private struct FolderSidebarRow: View {
-    let folder: TerminalFolder
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "folder")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.66))
-                .frame(width: 18)
-
-            Text(folder.title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.86))
-                .lineLimit(1)
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct TerminalSidebarRow: View {
-    let session: TerminalSession
-    let isSelected: Bool
-
-    var body: some View {
-        Text(session.title)
-            .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
-            .foregroundStyle(.white.opacity(isSelected ? 0.94 : 0.68))
-            .lineLimit(1)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(isSelected ? Color.white.opacity(0.11) : Color.clear)
-            )
-    }
-}
-
-private struct RenameFolderSheet: View {
+private struct RenameSheet: View {
+    let kind: String
     @Binding var title: String
     let onCancel: () -> Void
     let onSave: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Rename Folder")
+            Text("Rename \(kind)")
                 .font(.headline)
 
-            TextField("Folder name", text: $title)
+            TextField("\(kind) name", text: $title)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 320)
 
             HStack {
                 Spacer()
-
                 Button("Cancel", action: onCancel)
                     .keyboardShortcut(.cancelAction)
-
                 Button("Save", action: onSave)
                     .keyboardShortcut(.defaultAction)
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -224,4 +345,6 @@ private struct RenameFolderSheet: View {
 
 #Preview {
     SidebarView(store: .preview)
+        .frame(width: 264, height: 600)
+        .background(.black)
 }

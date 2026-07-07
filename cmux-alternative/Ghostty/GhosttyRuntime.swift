@@ -1,0 +1,203 @@
+import AppKit
+import GhosttyKit
+
+/// Owns the single libghostty app instance: global init, config loading,
+/// runtime callbacks, and the main-thread tick loop driven by ghostty wakeups.
+///
+/// The C callbacks fire on ghostty's internal threads, so everything they
+/// touch is nonisolated and they hop to the main actor for UI work.
+final class GhosttyRuntime {
+    static let shared = GhosttyRuntime()
+
+    nonisolated(unsafe) private(set) var app: ghostty_app_t?
+    nonisolated(unsafe) private var config: ghostty_config_t?
+
+    nonisolated private let tickLock = NSLock()
+    nonisolated(unsafe) private var tickScheduled = false
+    private var observers: [NSObjectProtocol] = []
+
+    private init() {}
+
+    /// Must be called on the main thread before creating any surface.
+    func ensureStarted() {
+        guard app == nil else { return }
+
+        guard ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == GHOSTTY_SUCCESS else {
+            NSLog("GhosttyRuntime: ghostty_init failed")
+            return
+        }
+
+        let config = loadConfig()
+        self.config = config
+
+        var runtimeConfig = ghostty_runtime_config_s()
+        runtimeConfig.userdata = Unmanaged.passUnretained(self).toOpaque()
+        runtimeConfig.supports_selection_clipboard = false
+
+        // Fires on ghostty's internal threads whenever the app needs a tick.
+        runtimeConfig.wakeup_cb = { userdata in
+            guard let userdata else { return }
+            Unmanaged<GhosttyRuntime>.fromOpaque(userdata).takeUnretainedValue().scheduleTick()
+        }
+
+        runtimeConfig.action_cb = { app, target, action in
+            GhosttyRuntime.handleAction(app: app, target: target, action: action)
+        }
+
+        // Clipboard callbacks receive the *surface* userdata (the view).
+        runtimeConfig.read_clipboard_cb = { userdata, location, state in
+            guard let userdata, location == GHOSTTY_CLIPBOARD_STANDARD else { return false }
+            let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+            Task { @MainActor in
+                guard let surface = view.surface else { return }
+                let text = NSPasteboard.general.string(forType: .string) ?? ""
+                text.withCString { ptr in
+                    ghostty_surface_complete_clipboard_request(surface, ptr, state, false)
+                }
+            }
+            return true
+        }
+
+        // Unsafe-paste style confirmations: auto-confirm for now.
+        runtimeConfig.confirm_read_clipboard_cb = { userdata, text, state, _ in
+            guard let userdata else { return }
+            let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+            let confirmed = text.map { String(cString: $0) } ?? ""
+            Task { @MainActor in
+                guard let surface = view.surface else { return }
+                confirmed.withCString { ptr in
+                    ghostty_surface_complete_clipboard_request(surface, ptr, state, true)
+                }
+            }
+        }
+
+        runtimeConfig.write_clipboard_cb = { _, location, items, count, _ in
+            guard location == GHOSTTY_CLIPBOARD_STANDARD, let items, count > 0 else { return }
+            var text: String?
+            for index in 0..<count {
+                let item = items[index]
+                guard let mime = item.mime, let data = item.data else { continue }
+                if String(cString: mime).hasPrefix("text/") {
+                    text = String(cString: data)
+                    break
+                }
+            }
+            guard let text else { return }
+            Task { @MainActor in
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        }
+
+        runtimeConfig.close_surface_cb = { userdata, _ in
+            guard let userdata else { return }
+            let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+            Task { @MainActor in
+                view.surfaceDidRequestClose()
+            }
+        }
+
+        var app = ghostty_app_new(&runtimeConfig, config)
+        if app == nil {
+            // A broken user config can fail app creation; retry with defaults.
+            NSLog("GhosttyRuntime: ghostty_app_new failed, retrying with default config")
+            if let config {
+                ghostty_config_free(config)
+            }
+            let fallback = ghostty_config_new()
+            ghostty_config_finalize(fallback)
+            self.config = fallback
+            app = ghostty_app_new(&runtimeConfig, fallback)
+        }
+        self.app = app
+
+        guard let app else {
+            NSLog("GhosttyRuntime: could not create ghostty app")
+            return
+        }
+
+        ghostty_app_set_focus(app, NSApp.isActive)
+        installObservers()
+    }
+
+    private func loadConfig() -> ghostty_config_t? {
+        let config = ghostty_config_new()
+        // Respect the user's Ghostty config (fonts, theme) when present.
+        ghostty_config_load_default_files(config)
+        ghostty_config_load_recursive_files(config)
+        ghostty_config_finalize(config)
+        return config
+    }
+
+    private func installObservers() {
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let app = self?.app else { return }
+            ghostty_app_set_focus(app, true)
+        })
+        observers.append(center.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let app = self?.app else { return }
+            ghostty_app_set_focus(app, false)
+        })
+        observers.append(center.addObserver(
+            forName: NSTextInputContext.keyboardSelectionDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let app = self?.app else { return }
+            ghostty_app_keyboard_changed(app)
+        })
+    }
+
+    /// Coalesces wakeups (which arrive on arbitrary threads) into a single
+    /// main-queue ghostty_app_tick. No display link, no manual draw loop —
+    /// ghostty's renderer thread drives drawing.
+    nonisolated private func scheduleTick() {
+        tickLock.lock()
+        let alreadyScheduled = tickScheduled
+        tickScheduled = true
+        tickLock.unlock()
+        guard !alreadyScheduled else { return }
+
+        Task { @MainActor [self] in
+            tickLock.lock()
+            tickScheduled = false
+            tickLock.unlock()
+            if let app {
+                ghostty_app_tick(app)
+            }
+        }
+    }
+
+    nonisolated private static func handleAction(
+        app: ghostty_app_t?,
+        target: ghostty_target_s,
+        action: ghostty_action_s
+    ) -> Bool {
+        switch action.tag {
+        case GHOSTTY_ACTION_SET_TITLE:
+            guard target.tag == GHOSTTY_TARGET_SURFACE,
+                  let surface = target.target.surface,
+                  let userdata = ghostty_surface_userdata(surface),
+                  let titlePtr = action.action.set_title.title
+            else { return false }
+            let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+            let title = String(cString: titlePtr)
+            Task { @MainActor in
+                view.onTitleChange?(title)
+            }
+            return true
+
+        case GHOSTTY_ACTION_QUIT:
+            Task { @MainActor in
+                NSApp.terminate(nil)
+            }
+            return true
+
+        default:
+            return false
+        }
+    }
+}

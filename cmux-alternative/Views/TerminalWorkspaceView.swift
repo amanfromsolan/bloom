@@ -17,13 +17,10 @@ struct TerminalWorkspaceView: View {
                         }
                     )
 
-                    Divider()
-                        .overlay(Color.white.opacity(0.08))
-
-                    GhosttyTerminalHostView(session: session)
+                    GhosttyTerminalHostView(session: session, store: store)
                         .id(session.id)
                 }
-                .background(Color(red: 0.025, green: 0.027, blue: 0.032))
+                .background(Color(red: 0.018, green: 0.019, blue: 0.023))
                 .sheet(isPresented: $isRenaming) {
                     RenameSessionSheet(
                         title: $draftTitle,
@@ -38,46 +35,12 @@ struct TerminalWorkspaceView: View {
                 }
             } else {
                 ContentUnavailableView(
-                    "No Session",
+                    "No Tabs",
                     systemImage: "terminal",
-                    description: Text("Create a session to start a terminal workspace.")
+                    description: Text("Press ⌘T to open a new tab.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(red: 0.025, green: 0.027, blue: 0.032))
-            }
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    store.focusPreviousSession()
-                } label: {
-                    Label("Previous Session", systemImage: "chevron.left")
-                }
-                .help("Previous Session")
-
-                Button {
-                    store.focusNextSession()
-                } label: {
-                    Label("Next Session", systemImage: "chevron.right")
-                }
-                .help("Next Session")
-
-                Divider()
-
-                Button {
-                    store.duplicateSelectedSession()
-                } label: {
-                    Label("Duplicate Session", systemImage: "plus.square.on.square")
-                }
-                .help("Duplicate Session")
-
-                Button {
-                    store.closeSelectedSession()
-                } label: {
-                    Label("Close Session", systemImage: "xmark")
-                }
-                .disabled(store.sessions.count == 1)
-                .help("Close Session")
+                .background(Color(red: 0.018, green: 0.019, blue: 0.023))
             }
         }
     }
@@ -90,10 +53,10 @@ private struct RenameSessionSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Rename Session")
+            Text("Rename Tab")
                 .font(.headline)
 
-            TextField("Session name", text: $title)
+            TextField("Tab name", text: $title)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 320)
 

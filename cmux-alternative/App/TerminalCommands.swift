@@ -5,7 +5,7 @@ struct TerminalCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Session") {
+            Button("New Tab") {
                 store.createSession()
             }
             .keyboardShortcut("t", modifiers: .command)
@@ -16,26 +16,32 @@ struct TerminalCommands: Commands {
             .keyboardShortcut("n", modifiers: [.command, .shift])
         }
 
-        CommandMenu("Session") {
-            Button("Duplicate Session") {
-                store.duplicateSelectedSession()
+        CommandMenu("Tab") {
+            Button(pinTitle) {
+                guard let selection = store.selection else { return }
+                if store.isPinned(selection) {
+                    store.unpin([selection])
+                } else {
+                    store.pin([selection])
+                }
             }
-            .keyboardShortcut("d", modifiers: [.command, .shift])
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+            .disabled(store.selection == nil)
 
-            Button("Close Session") {
+            Button("Close Tab") {
                 store.closeSelectedSession()
             }
             .keyboardShortcut("w", modifiers: .command)
-            .disabled(store.sessions.count == 1)
+            .disabled(store.selection == nil)
 
             Divider()
 
-            Button("Previous Session") {
+            Button("Previous Tab") {
                 store.focusPreviousSession()
             }
             .keyboardShortcut("[", modifiers: [.command, .shift])
 
-            Button("Next Session") {
+            Button("Next Tab") {
                 store.focusNextSession()
             }
             .keyboardShortcut("]", modifiers: [.command, .shift])
@@ -43,12 +49,19 @@ struct TerminalCommands: Commands {
             Divider()
 
             ForEach(1...9, id: \.self) { index in
-                Button("Select Session \(index)") {
+                Button("Select Tab \(index)") {
                     store.focusSession(atShortcutIndex: index)
                 }
                 .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
                 .disabled(store.sessions.count < index)
             }
         }
+    }
+
+    private var pinTitle: String {
+        guard let selection = store.selection, store.isPinned(selection) else {
+            return "Pin Tab"
+        }
+        return "Unpin Tab"
     }
 }

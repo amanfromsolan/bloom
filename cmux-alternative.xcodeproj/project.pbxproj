@@ -18,6 +18,10 @@
 		A10000152FD810C30001BF12 /* TerminalHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000062FD810C30001BF12 /* TerminalHeaderView.swift */; };
 		A10000162FD810C30001BF12 /* TerminalRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000072FD810C30001BF12 /* TerminalRootView.swift */; };
 		A10000172FD810C30001BF12 /* TerminalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000082FD810C30001BF12 /* TerminalWorkspaceView.swift */; };
+		A10000302FD810C30001BF12 /* GhosttyRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000332FD810C30001BF12 /* GhosttyRuntime.swift */; };
+		A10000312FD810C30001BF12 /* GhosttySurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000342FD810C30001BF12 /* GhosttySurfaceView.swift */; };
+		A10000322FD810C30001BF12 /* GhosttySurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000352FD810C30001BF12 /* GhosttySurfaceManager.swift */; };
+		A10000362FD810C30001BF12 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000372FD810C30001BF12 /* GhosttyKit.xcframework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,6 +53,10 @@
 		A10000092FD810C30001BF12 /* cmux_alternativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = cmux_alternativeApp.swift; sourceTree = "<group>"; };
 		A100000B2FD810C30001BF12 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A100000D2FD810C30001BF12 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A10000332FD810C30001BF12 /* GhosttyRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyRuntime.swift; sourceTree = "<group>"; };
+		A10000342FD810C30001BF12 /* GhosttySurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttySurfaceView.swift; sourceTree = "<group>"; };
+		A10000352FD810C30001BF12 /* GhosttySurfaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttySurfaceManager.swift; sourceTree = "<group>"; };
+		A10000372FD810C30001BF12 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
 		070AC37B2FD810C30001BF12 /* cmux-alternative.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "cmux-alternative.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		070AC3882FD810C50001BF12 /* cmux-alternativeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "cmux-alternativeTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		070AC3922FD810C50001BF12 /* cmux-alternativeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "cmux-alternativeUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -59,6 +67,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000362FD810C30001BF12 /* GhosttyKit.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -85,6 +94,16 @@
 				A10000012FD810C30001BF12 /* TerminalCommands.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		A10000382FD810C30001BF12 /* Ghostty */ = {
+			isa = PBXGroup;
+			children = (
+				A10000332FD810C30001BF12 /* GhosttyRuntime.swift */,
+				A10000342FD810C30001BF12 /* GhosttySurfaceView.swift */,
+				A10000352FD810C30001BF12 /* GhosttySurfaceManager.swift */,
+			);
+			path = Ghostty;
 			sourceTree = "<group>";
 		};
 		A10000212FD810C30001BF12 /* Models */ = {
@@ -125,6 +144,7 @@
 		070AC3722FD810C30001BF12 = {
 			isa = PBXGroup;
 			children = (
+				A10000372FD810C30001BF12 /* GhosttyKit.xcframework */,
 				070AC37D2FD810C30001BF12 /* cmux-alternative */,
 				070AC38B2FD810C50001BF12 /* cmux-alternativeTests */,
 				070AC3952FD810C50001BF12 /* cmux-alternativeUITests */,
@@ -146,6 +166,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000202FD810C30001BF12 /* App */,
+				A10000382FD810C30001BF12 /* Ghostty */,
 				A10000212FD810C30001BF12 /* Models */,
 				A10000222FD810C30001BF12 /* Services */,
 				A10000232FD810C30001BF12 /* Stores */,
@@ -312,6 +333,9 @@
 				A10000102FD810C30001BF12 /* TerminalCommands.swift in Sources */,
 				A10000112FD810C30001BF12 /* TerminalSession.swift in Sources */,
 				A10000122FD810C30001BF12 /* GhosttyTerminalHostView.swift in Sources */,
+				A10000302FD810C30001BF12 /* GhosttyRuntime.swift in Sources */,
+				A10000312FD810C30001BF12 /* GhosttySurfaceView.swift in Sources */,
+				A10000322FD810C30001BF12 /* GhosttySurfaceManager.swift in Sources */,
 				A10000132FD810C30001BF12 /* TerminalSessionStore.swift in Sources */,
 				A10000142FD810C30001BF12 /* SidebarView.swift in Sources */,
 				A10000152FD810C30001BF12 /* TerminalHeaderView.swift in Sources */,
@@ -481,7 +505,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = HFXABN57R2;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
@@ -491,6 +515,11 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lc++",
+					"-framework",
+					Carbon,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.amanchaudhary.cmux-alternative";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -516,7 +545,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = HFXABN57R2;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
@@ -526,6 +555,11 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lc++",
+					"-framework",
+					Carbon,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.amanchaudhary.cmux-alternative";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

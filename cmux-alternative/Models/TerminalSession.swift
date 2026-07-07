@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-struct TerminalFolder: Identifiable, Hashable {
+struct TerminalFolder: Identifiable, Hashable, Codable {
     let id: UUID
     var title: String
     var sessions: [TerminalSession]
@@ -17,8 +17,8 @@ struct TerminalFolder: Identifiable, Hashable {
     }
 }
 
-struct TerminalSession: Identifiable, Hashable {
-    enum Status: String, CaseIterable {
+struct TerminalSession: Identifiable, Hashable, Codable {
+    enum Status: String, CaseIterable, Codable {
         case running = "Running"
         case idle = "Idle"
         case attention = "Needs Attention"
@@ -51,7 +51,7 @@ struct TerminalSession: Identifiable, Hashable {
     }
 }
 
-enum SessionAccent: String, CaseIterable, Hashable {
+enum SessionAccent: String, CaseIterable, Hashable, Codable {
     case blue
     case green
     case orange

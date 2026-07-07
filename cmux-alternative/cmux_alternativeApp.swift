@@ -17,9 +17,36 @@ struct cmux_alternativeApp: App {
                 .frame(minWidth: 920, minHeight: 560)
                 .preferredColorScheme(.dark)
         }
-        .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             TerminalCommands(store: sessionStore)
         }
+
+        Settings {
+            SettingsView()
+        }
+    }
+}
+
+private struct SettingsView: View {
+    @AppStorage(TerminalSessionStore.ephemeralTTLDefaultsKey)
+    private var ephemeralTTLHours = 24
+
+    var body: some View {
+        Form {
+            Picker("Close unpinned tabs after", selection: $ephemeralTTLHours) {
+                Text("12 hours").tag(12)
+                Text("24 hours").tag(24)
+                Text("48 hours").tag(48)
+                Text("Never").tag(0)
+            }
+            .pickerStyle(.inline)
+
+            Text("Tabs below the sidebar divider are temporary. Pin a tab (drag it above the divider) to keep it forever.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(20)
+        .frame(width: 380)
     }
 }
