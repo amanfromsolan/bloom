@@ -100,32 +100,32 @@ struct QuitConfirmationHUD: View {
     var body: some View {
         VStack(spacing: 0) {
             KeycapGlyph(label: "⌘Q")
-                .padding(.bottom, 16)
+                .padding(.bottom, 20)
 
             Text("Quit Bloom?")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.95))
-                .padding(.bottom, 6)
+                .padding(.bottom, 8)
 
             Text(subtitle)
-                .font(.system(size: 12))
+                .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 14)
+                .padding(.bottom, 18)
 
             Text("Press ⌘Q again to quit")
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.white.opacity(0.4))
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 24)
-        .frame(width: 300)
+        .padding(.horizontal, 36)
+        .padding(.vertical, 30)
+        .frame(width: 380)
         .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Color.black.opacity(0.22))
                 )
                 // Tight hard shadow for definition + wide diffused one for depth.
@@ -147,15 +147,15 @@ private struct KeycapGlyph: View {
 
     var body: some View {
         Text(label)
-            .font(.system(size: 17, weight: .medium, design: .rounded))
+            .font(.system(size: 21, weight: .medium, design: .rounded))
             .foregroundStyle(.white.opacity(0.85))
-            .padding(.horizontal, 13)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(Color.white.opacity(0.08))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
                             .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
                     )
                     .shadow(color: .black.opacity(0.35), radius: 0, y: 1.5)
