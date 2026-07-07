@@ -18,7 +18,6 @@ struct TerminalWorkspaceView: View {
                     )
 
                     GhosttyTerminalHostView(session: session, store: store)
-                        .id(session.id)
                 }
                 .background(GhosttyRuntime.shared.themeBackground)
                 .sheet(isPresented: $isRenaming) {

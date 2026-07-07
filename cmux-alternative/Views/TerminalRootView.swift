@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TerminalRootView: View {
     @ObservedObject var store: TerminalSessionStore
+    @StateObject private var switcher = TabSwitcher()
     @SceneStorage("selectedSessionID") private var storedSelection: String?
 
     var body: some View {
@@ -26,6 +27,13 @@ struct TerminalRootView: View {
                         .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
                 )
                 .shadow(color: .black.opacity(0.45), radius: 16, y: 4)
+                .overlay {
+                    if switcher.isShowingHUD {
+                        TabSwitcherHUD(switcher: switcher, store: store)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeOut(duration: 0.12), value: switcher.isShowingHUD)
                 .padding(EdgeInsets(top: 10, leading: 6, bottom: 10, trailing: 10))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -37,6 +45,7 @@ struct TerminalRootView: View {
         .ignoresSafeArea()
         .onAppear {
             restoreSelection()
+            switcher.attach(to: store)
         }
         .onChange(of: store.selection) { _, selection in
             storedSelection = selection?.uuidString

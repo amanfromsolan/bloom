@@ -30,8 +30,13 @@ struct GhosttyTerminalHostView: NSViewRepresentable {
         surfaceView.autoresizingMask = [.width, .height]
         container.addSubview(surfaceView)
 
-        DispatchQueue.main.async {
-            container.window?.makeFirstResponder(surfaceView)
+        if let window = container.window {
+            window.makeFirstResponder(surfaceView)
+        } else {
+            // First appearance: the container isn't in a window yet.
+            DispatchQueue.main.async {
+                container.window?.makeFirstResponder(surfaceView)
+            }
         }
     }
 }

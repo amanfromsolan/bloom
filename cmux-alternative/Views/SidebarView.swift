@@ -323,12 +323,29 @@ private struct SpacePage: View {
             }
             .padding(.horizontal, 10)
             .padding(.bottom, 10)
-            .animation(.snappy(duration: 0.22), value: space)
+            .animation(.snappy(duration: 0.22), value: rowLayout)
             .animation(.snappy(duration: 0.22), value: expandedFolders)
-            .onTapGesture {
-                cancelRenames()
-            }
+            // Behind the rows, so it only catches clicks on empty sidebar
+            // space — row clicks never race it into cancelling a rename.
+            .background(
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { cancelRenames() }
+            )
         }
+    }
+
+    /// Row layout identity: animates structural changes (add/remove/reorder,
+    /// pin/unpin) without animating metadata-only updates — selecting a tab
+    /// stamps its lastActivity, and that must not fade the highlight in.
+    private var rowLayout: [UUID] {
+        var ids = space.pinnedSessions.map(\.id)
+        for folder in space.pinnedFolders {
+            ids.append(folder.id)
+            ids.append(contentsOf: folder.sessions.map(\.id))
+        }
+        ids.append(contentsOf: space.ephemeralSessions.map(\.id))
+        return ids
     }
 
     /// Clicking empty sidebar space backs out of any in-progress rename.
@@ -605,7 +622,7 @@ private struct SpacePage: View {
                         }
                 } else {
                     Text(session.title)
-                        .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                        .font(.system(size: 13))
                         .foregroundStyle(.white.opacity(isSelected ? 0.95 : 0.62))
                         .lineLimit(1)
                 }
@@ -629,12 +646,18 @@ private struct SpacePage: View {
                     )
             )
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                beginRename(session)
-            }
-            .onTapGesture {
-                handleTap(session)
-            }
+            // A single immediate gesture (no TapGesture(count: 2) sibling):
+            // pairing single+double tap makes SwiftUI hold every click for
+            // the double-click interval before selecting. Instead, select on
+            // every click instantly and start rename when the event stream
+            // says this click was the second one.
+            .simultaneousGesture(TapGesture().onEnded {
+                if NSApp.currentEvent?.clickCount == 2 {
+                    beginRename(session)
+                } else {
+                    handleTap(session)
+                }
+            })
             .draggable(dragPayload(for: session))
             .contextMenu {
                 contextMenu(for: session)

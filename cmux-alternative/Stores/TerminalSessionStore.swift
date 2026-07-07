@@ -8,10 +8,20 @@ final class TerminalSessionStore: ObservableObject {
     @Published private(set) var activeSpaceID: SidebarSpace.ID
 
     @Published var selection: TerminalSession.ID? {
-        didSet { touch(selection) }
+        didSet {
+            touch(selection)
+            recordRecency(selection)
+        }
     }
     /// Rows highlighted for multi-select actions (folder creation, bulk close).
     @Published var multiSelection: Set<TerminalSession.ID> = []
+
+    /// Most-recently-used selection order per space; drives the Ctrl-Tab
+    /// switcher. Session-only — falls back to display order on launch.
+    private var recency: [SidebarSpace.ID: [TerminalSession.ID]] = [:]
+    /// While the Ctrl-Tab switcher previews tabs, selection changes must not
+    /// reshuffle recency; the switcher records its final pick on commit.
+    var isCyclingSelection = false
 
     private var expiryTimer: Timer?
     private let persistToDisk: Bool
@@ -381,6 +391,32 @@ final class TerminalSessionStore: ObservableObject {
         }
         guard !expired.isEmpty else { return }
         close(sessionIDs: Set(expired.map(\.id)))
+    }
+
+    // MARK: - Selection recency
+
+    /// The space's sessions in most-recently-used order; sessions never
+    /// selected this launch keep their display order at the end.
+    func recencyOrderedSessions(inSpace spaceID: SidebarSpace.ID) -> [TerminalSession] {
+        guard let space = spaces.first(where: { $0.id == spaceID }) else { return [] }
+        let all = space.sessions
+        let order = recency[spaceID] ?? []
+        let ranked = order.compactMap { id in all.first { $0.id == id } }
+        let rest = all.filter { session in !order.contains(session.id) }
+        return ranked + rest
+    }
+
+    /// Called by the switcher on commit, after cycling suppressed recording.
+    func recordSelectionRecency() {
+        recordRecency(selection)
+    }
+
+    private func recordRecency(_ sessionID: TerminalSession.ID?) {
+        guard let sessionID, !isCyclingSelection else { return }
+        var order = recency[activeSpaceID] ?? []
+        order.removeAll { $0 == sessionID }
+        order.insert(sessionID, at: 0)
+        recency[activeSpaceID] = order
     }
 
     private func touch(_ sessionID: TerminalSession.ID?) {
