@@ -7,6 +7,59 @@
 
 import SwiftUI
 
+/// Finder Services entry point: right-click a folder → "New Bloom Terminal
+/// Here" opens a tab at that directory (declared in Info.plist NSServices).
+@MainActor
+final class ServiceProvider: NSObject {
+    static let shared = ServiceProvider()
+
+    private weak var store: TerminalSessionStore?
+    /// Requests that arrived before launch finished attaching the store.
+    private var pendingPaths: [String] = []
+
+    func attach(store: TerminalSessionStore) {
+        self.store = store
+        let paths = pendingPaths
+        pendingPaths = []
+        paths.forEach(openTerminal(at:))
+    }
+
+    @objc func newTerminalHere(
+        _ pasteboard: NSPasteboard,
+        userData: String,
+        error: AutoreleasingUnsafeMutablePointer<NSString>
+    ) {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        var paths: [String] = []
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL],
+           !urls.isEmpty {
+            paths = urls.map(\.path)
+        } else if let names = pasteboard.propertyList(
+            forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")
+        ) as? [String] {
+            paths = names
+        } else if let text = pasteboard.string(forType: .string) {
+            paths = [text]
+        }
+
+        for path in paths {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else { continue }
+            let directory = isDirectory.boolValue ? path : (path as NSString).deletingLastPathComponent
+            openTerminal(at: directory)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func openTerminal(at path: String) {
+        guard let store else {
+            pendingPaths.append(path)
+            return
+        }
+        store.createSession(workingDirectory: path)
+    }
+}
+
 @main
 struct BloomApp: App {
     @StateObject private var sessionStore = TerminalSessionStore()
@@ -30,6 +83,8 @@ struct BloomApp: App {
                 .preferredColorScheme(.dark)
                 .onAppear {
                     TabAutoNamer.shared.configure(store: sessionStore)
+                    ServiceProvider.shared.attach(store: sessionStore)
+                    NSApp.servicesProvider = ServiceProvider.shared
                 }
         }
         .windowStyle(.hiddenTitleBar)
