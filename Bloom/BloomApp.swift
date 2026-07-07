@@ -62,6 +62,7 @@ final class ServiceProvider: NSObject {
 
 @main
 struct BloomApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var sessionStore = TerminalSessionStore()
 
     init() {
@@ -84,7 +85,9 @@ struct BloomApp: App {
                 .onAppear {
                     TabAutoNamer.shared.configure(store: sessionStore)
                     ServiceProvider.shared.attach(store: sessionStore)
+                    QuitGuard.shared.attach(store: sessionStore)
                     NSApp.servicesProvider = ServiceProvider.shared
+                    UpdateController.shared.start()
                 }
         }
         .windowStyle(.hiddenTitleBar)

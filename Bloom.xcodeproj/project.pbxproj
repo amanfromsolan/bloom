@@ -13,6 +13,7 @@
 		A1GRES0012FD810C30001BF12 /* terminfo in Resources */ = {isa = PBXBuildFile; fileRef = A1GRES0022FD810C30001BF12 /* terminfo */; };
 		A1GRES0032FD810C30001BF12 /* ghostty in Resources */ = {isa = PBXBuildFile; fileRef = A1GRES0042FD810C30001BF12 /* ghostty */; };
 		A10000102FD810C30001BF12 /* TerminalCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012FD810C30001BF12 /* TerminalCommands.swift */; };
+		A1QUITG012FD810C30001BF12 /* QuitGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1QUITG022FD810C30001BF12 /* QuitGuard.swift */; };
 		A10000112FD810C30001BF12 /* TerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000022FD810C30001BF12 /* TerminalSession.swift */; };
 		A1TABPRC012FD810C30001BF12 /* TabProcess.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1TABPRC022FD810C30001BF12 /* TabProcess.swift */; };
 		A10000122FD810C30001BF12 /* GhosttyTerminalHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000032FD810C30001BF12 /* GhosttyTerminalHostView.swift */; };
@@ -29,6 +30,9 @@
 		A10000312FD810C30001BF12 /* GhosttySurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000342FD810C30001BF12 /* GhosttySurfaceView.swift */; };
 		A10000322FD810C30001BF12 /* GhosttySurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000352FD810C30001BF12 /* GhosttySurfaceManager.swift */; };
 		A10000362FD810C30001BF12 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000372FD810C30001BF12 /* GhosttyKit.xcframework */; };
+		A1UPDCTL012FD810C30001BF12 /* UpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1UPDCTL022FD810C30001BF12 /* UpdateController.swift */; };
+		A1UPDCRD012FD810C30001BF12 /* UpdateCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1UPDCRD022FD810C30001BF12 /* UpdateCardView.swift */; };
+		A1SPKLBLD12FD810C30001BF12 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A1SPKLPRD12FD810C30001BF12 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -50,6 +54,7 @@
 
 /* Begin PBXFileReference section */
 		A10000012FD810C30001BF12 /* TerminalCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalCommands.swift; sourceTree = "<group>"; };
+		A1QUITG022FD810C30001BF12 /* QuitGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuitGuard.swift; sourceTree = "<group>"; };
 		A10000022FD810C30001BF12 /* TerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSession.swift; sourceTree = "<group>"; };
 		A1TABPRC022FD810C30001BF12 /* TabProcess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabProcess.swift; sourceTree = "<group>"; };
 		A10000032FD810C30001BF12 /* GhosttyTerminalHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyTerminalHostView.swift; sourceTree = "<group>"; };
@@ -58,6 +63,8 @@
 		A1CMDCTR022FD810C30001BF12 /* CommandCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCenter.swift; sourceTree = "<group>"; };
 		A10000042FD810C30001BF12 /* TerminalSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionStore.swift; sourceTree = "<group>"; };
 		A10000052FD810C30001BF12 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		A1UPDCTL022FD810C30001BF12 /* UpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateController.swift; sourceTree = "<group>"; };
+		A1UPDCRD022FD810C30001BF12 /* UpdateCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCardView.swift; sourceTree = "<group>"; };
 		A1SETPNL022FD810C30001BF12 /* SettingsPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelView.swift; sourceTree = "<group>"; };
 		A10000062FD810C30001BF12 /* TerminalHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalHeaderView.swift; sourceTree = "<group>"; };
 		A10000072FD810C30001BF12 /* TerminalRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalRootView.swift; sourceTree = "<group>"; };
@@ -82,6 +89,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000362FD810C30001BF12 /* GhosttyKit.xcframework in Frameworks */,
+				A1SPKLBLD12FD810C30001BF12 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -106,6 +114,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000012FD810C30001BF12 /* TerminalCommands.swift */,
+				A1QUITG022FD810C30001BF12 /* QuitGuard.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -136,6 +145,7 @@
 				A1TABSW022FD810C30001BF12 /* TabSwitcher.swift */,
 				A1AUTONM022FD810C30001BF12 /* TabAutoNamer.swift */,
 				A1CMDCTR022FD810C30001BF12 /* CommandCenter.swift */,
+				A1UPDCTL022FD810C30001BF12 /* UpdateController.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -156,6 +166,7 @@
 				A10000062FD810C30001BF12 /* TerminalHeaderView.swift */,
 				A10000072FD810C30001BF12 /* TerminalRootView.swift */,
 				A10000082FD810C30001BF12 /* TerminalWorkspaceView.swift */,
+				A1UPDCRD022FD810C30001BF12 /* UpdateCardView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -230,6 +241,7 @@
 			);
 			name = "Bloom";
 			packageProductDependencies = (
+				A1SPKLPRD12FD810C30001BF12 /* Sparkle */,
 			);
 			productName = "Bloom";
 			productReference = 070AC37B2FD810C30001BF12 /* Bloom.app */;
@@ -309,6 +321,9 @@
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 070AC37C2FD810C30001BF12 /* Products */;
+			packageReferences = (
+				A1SPKLREF12FD810C30001BF12 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -354,6 +369,7 @@
 				A100000A2FD810C30001BF12 /* BloomApp.swift in Sources */,
 				A100000C2FD810C30001BF12 /* ContentView.swift in Sources */,
 				A10000102FD810C30001BF12 /* TerminalCommands.swift in Sources */,
+				A1QUITG012FD810C30001BF12 /* QuitGuard.swift in Sources */,
 				A10000112FD810C30001BF12 /* TerminalSession.swift in Sources */,
 				A1TABPRC012FD810C30001BF12 /* TabProcess.swift in Sources */,
 				A10000122FD810C30001BF12 /* GhosttyTerminalHostView.swift in Sources */,
@@ -369,6 +385,8 @@
 				A10000152FD810C30001BF12 /* TerminalHeaderView.swift in Sources */,
 				A10000162FD810C30001BF12 /* TerminalRootView.swift in Sources */,
 				A10000172FD810C30001BF12 /* TerminalWorkspaceView.swift in Sources */,
+				A1UPDCTL012FD810C30001BF12 /* UpdateController.swift in Sources */,
+				A1UPDCRD012FD810C30001BF12 /* UpdateCardView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -530,6 +548,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Bloom/Bloom.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = HFXABN57R2;
@@ -571,6 +590,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Bloom/Bloom.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = HFXABN57R2;
@@ -735,6 +755,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A1SPKLREF12FD810C30001BF12 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.3;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A1SPKLPRD12FD810C30001BF12 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1SPKLREF12FD810C30001BF12 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 070AC3732FD810C30001BF12 /* Project object */;
 }

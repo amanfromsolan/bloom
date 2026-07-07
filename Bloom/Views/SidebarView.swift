@@ -15,6 +15,7 @@ struct SidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             pager
+            UpdateCardView(controller: .shared)
             SpaceIndicatorBar(
                 store: store,
                 onEdit: { spaceEditor = .edit($0) },

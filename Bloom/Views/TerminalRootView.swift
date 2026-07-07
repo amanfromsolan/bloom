@@ -4,6 +4,7 @@ struct TerminalRootView: View {
     @ObservedObject var store: TerminalSessionStore
     @StateObject private var switcher = TabSwitcher()
     @ObservedObject private var commandCenter = CommandCenter.shared
+    @ObservedObject private var quitGuard = QuitGuard.shared
     @Environment(\.openWindow) private var openWindow
     @State private var spaceEditor: SpaceEditorSheet.Mode?
     @State private var isPeeking = false
@@ -53,6 +54,19 @@ struct TerminalRootView: View {
                     }
                 }
                 .animation(.easeOut(duration: 0.12), value: switcher.isShowingHUD)
+                .overlay {
+                    if quitGuard.isShowingHUD {
+                        ZStack {
+                            Color.black.opacity(0.35)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .allowsHitTesting(false)
+
+                            QuitConfirmationHUD(quitGuard: quitGuard)
+                        }
+                        .transition(.opacity)
+                    }
+                }
+                .animation(.easeOut(duration: 0.12), value: quitGuard.isShowingHUD)
                 .padding(EdgeInsets(
                     top: 10,
                     leading: store.isSidebarVisible ? 6 : 10,

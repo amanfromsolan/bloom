@@ -6,6 +6,19 @@
 	     Services entry (right-click a folder → New Bloom Terminal Here).
 	     Mirrors Ghostty's declaration — Finder reliably surfaces the
 	     NSSendTypes/NSFilenamesPboardType form. -->
+	<!-- Sparkle: appcast.xml is uploaded as an asset on each GitHub release;
+	     "latest" always serves the newest one. Checks are automatic, installs
+	     are user-driven from the sidebar update card. -->
+	<key>SUFeedURL</key>
+	<string>https://github.com/amanfromsolan/bloom/releases/latest/download/appcast.xml</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUPublicEDKey</key>
+	<string>jVlMlfpvvXW1n+1V2ZFp1qqu0uJGQibnxw1EkaY7sKc=</string>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>A program running in Bloom (such as voice dictation) would like to use your microphone.</string>
 	<key>NSServices</key>
 	<array>
 		<dict>

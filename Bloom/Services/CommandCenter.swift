@@ -333,6 +333,16 @@ final class CommandCenter: ObservableObject {
             store?.createSpace(name: "", icon: .dot)
         })
 
+        commands.append(PaletteItem(
+            id: "cmd-check-updates",
+            icon: .symbol("arrow.down.circle"),
+            title: "Check for Updates",
+            context: "Command",
+            verb: "Run"
+        ) {
+            UpdateController.shared.checkForUpdates()
+        })
+
         if let selection = store.selection {
             commands.append(PaletteItem(
                 id: "cmd-rename-tab",

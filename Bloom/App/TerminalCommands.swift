@@ -5,6 +5,12 @@ struct TerminalCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") {
+                UpdateController.shared.checkForUpdates()
+            }
+        }
+
         // Custom settings Window scene instead of the native Settings scene,
         // so the window keeps the app's own chrome; ⌘, still opens it.
         CommandGroup(replacing: .appSettings) {
