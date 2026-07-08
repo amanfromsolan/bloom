@@ -280,9 +280,16 @@ private struct SpacePage: View {
     @State private var hoveredFolderID: TerminalFolder.ID?
     /// Folder currently targeted by an in-flight drag (highlight or line).
     @State private var folderDropTargetID: TerminalFolder.ID?
+    /// Folder whose end-of-children strip is targeted.
+    @State private var folderEndDropFolderID: TerminalFolder.ID?
+    @State private var headerDropTargeted = false
+    @State private var pinnedZoneTargeted = false
+    @State private var ephemeralZoneTargeted = false
     /// Set at drag start so hover feedback knows a folder (not tabs) is in
     /// flight; healed by the next drag start if a drag is cancelled.
     @State private var draggedFolderID: TerminalFolder.ID?
+    /// Folders collapse for the flight; remember whether to reopen on drop.
+    @State private var draggedFolderWasExpanded = false
     @State private var renamingFolderID: TerminalFolder.ID?
     @State private var draftFolderTitle = ""
     @FocusState private var folderRenameFocused: Bool
@@ -409,11 +416,17 @@ private struct SpacePage: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.78))
                     .lineLimit(1)
+                    // Rename only on the name text, not the whole header.
+                    .onTapGesture(count: 2) {
+                        beginSpaceRename()
+                    }
             }
 
             Spacer(minLength: 0)
 
-            if headerHovered && !isRenamingSpace {
+            // Always laid out, faded on hover: conditionally inserting the
+            // 18pt controls changes the row height and jolts the sidebar.
+            Group {
                 HoverIconButton(systemName: "pencil", help: "Rename Space") {
                     beginSpaceRename()
                 }
@@ -442,6 +455,8 @@ private struct SpacePage: View {
                 )
                 .onHover { headerMenuHovered = $0 }
             }
+            .opacity(headerHovered && !isRenamingSpace ? 1 : 0)
+            .allowsHitTesting(headerHovered && !isRenamingSpace)
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 8)
@@ -452,9 +467,6 @@ private struct SpacePage: View {
         .contentShape(Rectangle())
         .onHover { hovering in
             headerHovered = hovering
-        }
-        .onTapGesture(count: 2) {
-            beginSpaceRename()
         }
         .padding(.bottom, 4)
     }
@@ -479,6 +491,22 @@ private struct SpacePage: View {
                         commitSpaceRename()
                     }
                 }
+                // Dropping on the header lands before the first pinned tab;
+                // the line hugs its bottom edge so it reads "list starts here".
+                .overlay(alignment: .bottom) {
+                    insertionLine(headerDropTargeted && draggedFolderID == nil)
+                }
+                .dropDestination(for: String.self) { items, _ in
+                    defer { clearDropFeedback() }
+                    guard folderID(from: items) == nil else { return false }
+                    let ids = sessionIDs(from: items)
+                    if let first = space.pinnedSessions.first {
+                        store.insert(ids, before: first.id)
+                    } else {
+                        store.pin(ids, inSpace: space.id)
+                    }
+                    return true
+                } isTargeted: { headerDropTargeted = $0 }
 
             if space.pinnedSessions.isEmpty && space.pinnedFolders.isEmpty {
                 Text("Drag tabs here to keep them")
@@ -492,24 +520,37 @@ private struct SpacePage: View {
                 sessionRow(session)
             }
 
+            // No indicator for tab drops on the zone's leftover dead space:
+            // the landing spot (after the loose tabs, far from the pointer)
+            // reads as a glitch. Every intentional position has its own
+            // target — rows, header, folder strips.
+
             ForEach(space.pinnedFolders) { folder in
-                // Folders read as tight clusters; breathing room between a
-                // folder and its neighbors keeps groups from blurring together.
+                // Breathing room between a folder and its neighbors comes
+                // entirely from the folder's own drop strip.
                 folderSection(folder)
-                    .padding(.vertical, 5)
             }
+
+            // Where a folder dropped on the zone's empty space will land:
+            // after the last folder.
+            insertionLine(pinnedZoneTargeted && draggedFolderID != nil && folderEndDropFolderID == nil)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .dropDestination(for: String.self) { items, _ in
+            defer { clearDropFeedback() }
             if let dragged = folderID(from: items) {
-                draggedFolderID = nil
                 store.moveFolder(dragged, toSpace: space.id)
+                restoreDraggedFolderExpansion(dragged)
                 return true
             }
+            // With folders present, a tab landing here missed a strip by a
+            // few points; bounce it back rather than teleporting it to the
+            // top of the loose list.
+            guard space.pinnedFolders.isEmpty else { return false }
             store.pin(sessionIDs(from: items), inSpace: space.id)
             return true
-        }
+        } isTargeted: { pinnedZoneTargeted = $0 }
     }
 
     private var zoneDivider: some View {
@@ -525,6 +566,10 @@ private struct SpacePage: View {
             ForEach(space.ephemeralSessions) { session in
                 sessionRow(session)
             }
+
+            // Where a tab dropped on the zone's empty space will land: the
+            // end of the list.
+            insertionLine(ephemeralZoneTargeted && draggedFolderID == nil)
 
             Button {
                 store.createSession(inSpace: space.id)
@@ -553,11 +598,12 @@ private struct SpacePage: View {
         }
         .contentShape(Rectangle())
         .dropDestination(for: String.self) { items, _ in
+            defer { clearDropFeedback() }
             // Folders are pinned-only; don't swallow their drops here.
             guard folderID(from: items) == nil else { return false }
             store.unpin(sessionIDs(from: items), inSpace: space.id)
             return true
-        }
+        } isTargeted: { ephemeralZoneTargeted = $0 }
     }
 
     private func folderSection(_ folder: TerminalFolder) -> some View {
@@ -571,13 +617,6 @@ private struct SpacePage: View {
         let isSessionDragOver = isDropTarget && draggedFolderID == nil
 
         return VStack(alignment: .leading, spacing: 2) {
-            // Insertion indicator while another folder is dragged over this one.
-            RoundedRectangle(cornerRadius: 1)
-                .fill(Color.accentColor)
-                .frame(height: 2)
-                .padding(.horizontal, 4)
-                .opacity(isFolderDragOver ? 1 : 0)
-
             HStack(spacing: 8) {
                 FolderGlyph(isOpen: isExpanded)
                     .fill(.white.opacity(0.6), style: FillStyle(eoFill: true))
@@ -601,15 +640,27 @@ private struct SpacePage: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(1)
+                        // Rename only on the title text; elsewhere the row
+                        // just toggles expansion.
+                        .simultaneousGesture(TapGesture().onEnded {
+                            guard renamingFolderID != folder.id else { return }
+                            if NSApp.currentEvent?.clickCount == 2 {
+                                // Undo the first click's expansion flip,
+                                // then rename inline.
+                                toggleExpansion(folder)
+                                beginFolderRename(folder)
+                            }
+                        })
                 }
 
                 Spacer(minLength: 0)
 
-                if isHovered, !isRenaming {
-                    HoverIconButton(systemName: "plus", help: "New Terminal in Folder") {
-                        store.createSession(inFolder: folder.id)
-                    }
+                // Always laid out, faded on hover — see spaceHeader.
+                HoverIconButton(systemName: "plus", help: "New Terminal in Folder") {
+                    store.createSession(inFolder: folder.id)
                 }
+                .opacity(isHovered && !isRenaming ? 1 : 0)
+                .allowsHitTesting(isHovered && !isRenaming)
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .bold))
@@ -629,6 +680,11 @@ private struct SpacePage: View {
                     )
             )
             .contentShape(Rectangle())
+            // Insertion indicator while another folder is dragged over this
+            // one; an overlay so it costs no layout height.
+            .overlay(alignment: .top) {
+                insertionLine(isFolderDragOver)
+            }
             .onHover { hovering in
                 if hovering {
                     hoveredFolderID = folder.id
@@ -636,17 +692,14 @@ private struct SpacePage: View {
                     hoveredFolderID = nil
                 }
             }
-            .onTapGesture {
+            // Simultaneous so the title text's rename gesture doesn't eat
+            // the single click (child gestures beat a plain onTapGesture).
+            .simultaneousGesture(TapGesture().onEnded {
                 guard renamingFolderID != folder.id else { return }
-                if NSApp.currentEvent?.clickCount == 2 {
-                    // Second click of a double-click: undo the first click's
-                    // expansion flip, then rename inline.
-                    toggleExpansion(folder)
-                    beginFolderRename(folder)
-                } else {
+                if NSApp.currentEvent?.clickCount == 1 {
                     toggleExpansion(folder)
                 }
-            }
+            })
             .contextMenu {
                 Button("New Terminal in Folder", systemImage: "plus") {
                     store.createSession(inFolder: folder.id)
@@ -672,6 +725,7 @@ private struct SpacePage: View {
             .onDrag {
                 // Folders travel collapsed: one compact row in flight
                 // instead of a whole column of children.
+                draggedFolderWasExpanded = !store.collapsedFolderIDs.contains(folder.id)
                 withAnimation(.easeOut(duration: 0.15)) {
                     store.collapsedFolderIDs.insert(folder.id)
                 }
@@ -679,11 +733,11 @@ private struct SpacePage: View {
                 return NSItemProvider(object: folderDragPayload(for: folder) as NSString)
             }
             .dropDestination(for: String.self) { items, _ in
-                folderDropTargetID = nil
+                defer { clearDropFeedback() }
                 if let dragged = folderID(from: items) {
-                    draggedFolderID = nil
                     guard dragged != folder.id else { return false }
                     store.insertFolder(dragged, before: folder.id)
+                    restoreDraggedFolderExpansion(dragged)
                     return true
                 }
                 store.move(sessionIDs(from: items), toFolder: folder.id)
@@ -708,7 +762,74 @@ private struct SpacePage: View {
             .clipped()
             .allowsHitTesting(isExpanded)
             .opacity(isExpanded ? 1 : 0)
+
+            // The gap after a folder is its landing strip: a dragged tab
+            // becomes the folder's last item (short line at child depth),
+            // a dragged folder slots in between the folders (full line).
+            RoundedRectangle(cornerRadius: 1)
+                .fill(Color.accentColor)
+                .frame(height: 2)
+                .padding(.leading, draggedFolderID == nil ? 18 : 4)
+                .padding(.trailing, 4)
+                .opacity(folderEndDropFolderID == folder.id ? 1 : 0)
+                .frame(maxWidth: .infinity)
+                // Swallows (nearly) the whole inter-folder gap; anything
+                // that slips past it hits the zone, which shows nothing.
+                .frame(height: 12)
+                .contentShape(Rectangle())
+                .dropDestination(for: String.self) { items, _ in
+                    defer { clearDropFeedback() }
+                    return handleFolderEndDrop(items, folder: folder)
+                } isTargeted: { targeted in
+                    if targeted {
+                        folderEndDropFolderID = folder.id
+                    } else if folderEndDropFolderID == folder.id {
+                        folderEndDropFolderID = nil
+                    }
+                }
         }
+    }
+
+    /// A drop on the strip after a folder: tabs append into the folder, a
+    /// dragged folder reorders to sit right after this one.
+    private func handleFolderEndDrop(_ items: [String], folder: TerminalFolder) -> Bool {
+        if let dragged = folderID(from: items) {
+            guard dragged != folder.id else { return false }
+            if let index = space.pinnedFolders.firstIndex(where: { $0.id == folder.id }),
+               index + 1 < space.pinnedFolders.count {
+                store.insertFolder(dragged, before: space.pinnedFolders[index + 1].id)
+            } else {
+                store.moveFolder(dragged, toSpace: space.id)
+            }
+            restoreDraggedFolderExpansion(dragged)
+            return true
+        }
+        let ids = sessionIDs(from: items)
+        guard !ids.isEmpty else { return false }
+        store.move(ids, toFolder: folder.id)
+        return true
+    }
+
+    /// A dropped folder reopens if it was expanded before its drag
+    /// collapsed it.
+    private func restoreDraggedFolderExpansion(_ folderID: TerminalFolder.ID) {
+        guard draggedFolderWasExpanded else { return }
+        withAnimation(.easeOut(duration: 0.15)) {
+            _ = store.collapsedFolderIDs.remove(folderID)
+        }
+    }
+
+    /// One drop just ended (or a new drag just began): no indicator may
+    /// survive it. Individual isTargeted callbacks don't always fire after
+    /// a successful drop, so every handler resets the lot.
+    private func clearDropFeedback() {
+        dropTargetID = nil
+        folderDropTargetID = nil
+        folderEndDropFolderID = nil
+        headerDropTargeted = false
+        pinnedZoneTargeted = false
+        ephemeralZoneTargeted = false
+        draggedFolderID = nil
     }
 
     @ViewBuilder
@@ -766,6 +887,13 @@ private struct SpacePage: View {
                         .foregroundStyle(.white.opacity(isSelected ? 0.95 : 0.62))
                         .lineLimit(1)
                         .nameShimmer(namer.namingSessions.contains(session.id))
+                        // Rename only when the double-click lands on the
+                        // title itself, not anywhere in the row.
+                        .simultaneousGesture(TapGesture().onEnded {
+                            if NSApp.currentEvent?.clickCount == 2 {
+                                beginRename(session)
+                            }
+                        })
                 }
 
                 Spacer(minLength: 0)
@@ -805,12 +933,9 @@ private struct SpacePage: View {
             // A single immediate gesture (no TapGesture(count: 2) sibling):
             // pairing single+double tap makes SwiftUI hold every click for
             // the double-click interval before selecting. Instead, select on
-            // every click instantly and start rename when the event stream
-            // says this click was the second one.
+            // every click instantly; rename lives on the title text itself.
             .simultaneousGesture(TapGesture().onEnded {
-                if NSApp.currentEvent?.clickCount == 2 {
-                    beginRename(session)
-                } else {
+                if NSApp.currentEvent?.clickCount == 1 {
                     handleTap(session)
                 }
             })
@@ -823,7 +948,7 @@ private struct SpacePage: View {
             }
         }
         .dropDestination(for: String.self) { items, _ in
-            dropTargetID = nil
+            defer { clearDropFeedback() }
             // Folders can't interleave with tabs; their drops land on
             // folder headers or the pinned zone.
             guard folderID(from: items) == nil else { return false }
@@ -974,6 +1099,14 @@ private struct SpacePage: View {
 
     private func sessionIDs(from items: [String]) -> Set<TerminalSession.ID> {
         Set(items.flatMap { $0.split(separator: ",") }.compactMap { UUID(uuidString: String($0)) })
+    }
+
+    private func insertionLine(_ visible: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 1)
+            .fill(Color.accentColor)
+            .frame(height: 2)
+            .padding(.horizontal, 4)
+            .opacity(visible ? 1 : 0)
     }
 
     private func folderDragPayload(for folder: TerminalFolder) -> String {
