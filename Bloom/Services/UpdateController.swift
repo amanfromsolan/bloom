@@ -123,9 +123,9 @@ final class UpdateController: NSObject, ObservableObject {
         pendingVersion = "0.5.0"
         releaseNotes = ReleaseNotesParser.parse(html: Self.debugNotesHTML, version: pendingVersion)
         phase = .available(version: pendingVersion)
-        // BLOOM_WHATS_NEW=1 lands straight in the sheet (design iteration
-        // without reaching for the card's button).
-        if ProcessInfo.processInfo.environment["BLOOM_WHATS_NEW"] == "1" {
+        // BLOOM_WHATS_NEW=sheet lands straight in the sheet (design
+        // iteration without reaching for the card's button).
+        if ProcessInfo.processInfo.environment["BLOOM_WHATS_NEW"] == "sheet" {
             isShowingWhatsNew = true
         }
     }

@@ -215,11 +215,13 @@ struct TerminalRootView: View {
             switcher.attach(to: store)
             commandCenter.attach(to: store)
             #if DEBUG
-            // Design scaffold: fake a found update shortly after launch so
-            // the sidebar card (with What's New) and the sheet behind it
-            // can be judged in the running app, where Sparkle is off.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                UpdateController.shared.debugSimulateUpdateFound()
+            // Design scaffold, opt-in: BLOOM_WHATS_NEW=1 fakes a found
+            // update (sidebar card); =sheet also opens the What's New
+            // sheet. Unset, dev launches stay clean.
+            if ProcessInfo.processInfo.environment["BLOOM_WHATS_NEW"] != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    UpdateController.shared.debugSimulateUpdateFound()
+                }
             }
             #endif
             // Screenshot/UI-test hook: sandboxed runners can't send ⌘,.
