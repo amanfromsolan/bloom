@@ -175,6 +175,29 @@ final class TerminalSessionStore: ObservableObject {
         save()
     }
 
+    /// New terminal inside a folder, continuing in the working directory of
+    /// the folder's most recently active tab (home for an empty folder).
+    func createSession(inFolder folderID: TerminalFolder.ID) {
+        for spaceIndex in spaces.indices {
+            guard let folderIndex = spaces[spaceIndex].pinnedFolders.firstIndex(where: { $0.id == folderID }) else {
+                continue
+            }
+            let folder = spaces[spaceIndex].pinnedFolders[folderIndex]
+            let cwd = folder.sessions.max(by: { $0.lastActivity < $1.lastActivity })?.workingDirectory
+            let session = Self.makeSession(workingDirectory: cwd, accentIndex: sessions.count)
+            spaces[spaceIndex].pinnedFolders[folderIndex].sessions.append(session)
+            if spaces[spaceIndex].id != activeSpaceID {
+                setActiveSpace(spaces[spaceIndex].id)
+            }
+            // Reveal the new tab even if the folder was collapsed.
+            collapsedFolderIDs.remove(folderID)
+            selection = session.id
+            multiSelection = [session.id]
+            save()
+            return
+        }
+    }
+
     func createFolder(inSpace spaceID: SidebarSpace.ID? = nil) {
         withSpace(spaceID ?? activeSpaceID) { space in
             space.pinnedFolders.append(TerminalFolder(title: "Folder \(space.pinnedFolders.count + 1)"))
@@ -318,6 +341,37 @@ final class TerminalSessionStore: ObservableObject {
             }
         }
         save()
+    }
+
+    /// Reorders: moves a folder so it sits immediately before the target
+    /// folder, in whatever space the target lives.
+    func insertFolder(_ folderID: TerminalFolder.ID, before targetID: TerminalFolder.ID) {
+        guard folderID != targetID, let folder = removeFolder(folderID) else { return }
+        for spaceIndex in spaces.indices {
+            if let index = spaces[spaceIndex].pinnedFolders.firstIndex(where: { $0.id == targetID }) {
+                spaces[spaceIndex].pinnedFolders.insert(folder, at: index)
+                save()
+                return
+            }
+        }
+        // Target vanished mid-drag; don't lose the folder.
+        withSpace(activeSpaceID) { $0.pinnedFolders.append(folder) }
+        save()
+    }
+
+    func moveFolder(_ folderID: TerminalFolder.ID, toSpace spaceID: SidebarSpace.ID) {
+        guard let folder = removeFolder(folderID) else { return }
+        withSpace(spaceID) { $0.pinnedFolders.append(folder) }
+        save()
+    }
+
+    private func removeFolder(_ folderID: TerminalFolder.ID) -> TerminalFolder? {
+        for spaceIndex in spaces.indices {
+            if let index = spaces[spaceIndex].pinnedFolders.firstIndex(where: { $0.id == folderID }) {
+                return spaces[spaceIndex].pinnedFolders.remove(at: index)
+            }
+        }
+        return nil
     }
 
     func deleteFolder(_ folderID: TerminalFolder.ID) {
