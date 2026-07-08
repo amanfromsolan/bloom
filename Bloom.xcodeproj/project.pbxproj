@@ -583,7 +583,7 @@
 					Carbon,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.amanchaudhary.bloom.debug;
-				PRODUCT_NAME = Bloom;
+				PRODUCT_NAME = "Bloom Nightly";
 				REGISTER_APP_GROUPS = YES;
 				SDK_STAT_CACHE_ENABLE = NO;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

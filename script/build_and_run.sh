@@ -7,7 +7,9 @@ set -euo pipefail
 # path — never by process name, which the installed Bloom shares.
 
 MODE="${1:-run}"
-APP_NAME="Bloom"
+# Debug PRODUCT_NAME is "Bloom Nightly" so the Dock and app menu carry the
+# nightly name; the Xcode target and scheme are still "Bloom".
+APP_NAME="Bloom Nightly"
 PROJECT="Bloom.xcodeproj"
 SCHEME="Bloom"
 CONFIGURATION="Debug"
