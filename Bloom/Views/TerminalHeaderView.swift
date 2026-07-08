@@ -6,14 +6,10 @@ import SwiftUI
 /// titlebar. Shows the tab name plus a live breadcrumb of the shell's cwd.
 struct TerminalHeaderView: View {
     let session: TerminalSession
-    let isSidebarVisible: Bool
-    let onToggleSidebar: () -> Void
     let onRename: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            SidebarToggleButton(isSidebarVisible: isSidebarVisible, action: onToggleSidebar)
-
             Spacer(minLength: 0)
 
             HStack(spacing: 8) {
@@ -34,19 +30,18 @@ struct TerminalHeaderView: View {
             }
 
             Spacer(minLength: 0)
-
-            #if DEBUG
-            DevBadge()
-                .frame(height: 22)
-            #else
-            // Balances the toggle button so the title stays centered.
-            Color.clear
-                .frame(width: 26, height: 22)
-            #endif
         }
         .padding(.horizontal, 12)
         .frame(height: 34)
         .frame(maxWidth: .infinity)
+        #if DEBUG
+        // Overlaid so the badge never pushes the centered title off-axis.
+        .overlay(alignment: .trailing) {
+            DevBadge()
+                .frame(height: 22)
+                .padding(.trailing, 12)
+        }
+        #endif
         .contentShape(Rectangle())
         .gesture(WindowDragGesture())
         .onTapGesture(count: 2) {
@@ -87,12 +82,12 @@ struct TerminalHeaderView: View {
 }
 
 #if DEBUG
-/// Marks a "Bloom Dev" window so it's never mistaken for the installed
+/// Marks a "Bloom Nightly" window so it's never mistaken for the installed
 /// Bloom while dogfooding. Debug builds only.
 private struct DevBadge: View {
     var body: some View {
-        Text("DEV")
-            .font(.system(size: 9, weight: .bold))
+        Text("NIGHTLY")
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
             .tracking(0.8)
             .foregroundStyle(Color.yellow.opacity(0.85))
             .padding(.horizontal, 6)
@@ -103,8 +98,8 @@ private struct DevBadge: View {
 }
 #endif
 
-/// Sidebar toggle living at the leftmost of the terminal title strip;
-/// quiet until hovered.
+/// Sidebar toggle rendered in the window titlebar beside the traffic
+/// lights (see TrafficLightInset); quiet until hovered.
 struct SidebarToggleButton: View {
     let isSidebarVisible: Bool
     let action: () -> Void
@@ -182,8 +177,6 @@ struct PathTrail {
 #Preview {
     TerminalHeaderView(
         session: TerminalSessionStore.preview.sessions[0],
-        isSidebarVisible: true,
-        onToggleSidebar: {},
         onRename: {}
     )
         .background(.black)

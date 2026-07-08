@@ -75,9 +75,20 @@ struct TerminalRootView: View {
                     trailing: 10
                 ))
         }
-        .animation(.spring(duration: 0.28, bounce: 0.12), value: store.isSidebarVisible)
+        // Pinning while peeked swaps the overlay for the real sidebar in
+        // place — animating would slide in a panel that's already on screen,
+        // so that path commits instantly. Toggles without a peek (⌘B) keep
+        // the spring.
+        .animation(
+            isPeeking ? nil : .spring(duration: 0.28, bounce: 0.12),
+            value: store.isSidebarVisible
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TrafficLightInset(buttonsHidden: !(store.isSidebarVisible || isPeeking)))
+        .background(TrafficLightInset(
+            buttonsHidden: !(store.isSidebarVisible || isPeeking),
+            isSidebarVisible: store.isSidebarVisible,
+            onToggleSidebar: { store.isSidebarVisible.toggle() }
+        ))
         .background(
             SidebarMaterial()
                 .overlay(Color.black.opacity(0.38))
@@ -378,8 +389,13 @@ private struct PeekMouseMonitor: NSViewRepresentable {
 /// unified toolbar (taller titlebar metrics) — AppKit centers them natively,
 /// so the position is stable through every relayout, live resize included;
 /// no frame-fighting. Hiding fades alpha only, which never relayouts.
+/// Also hosts the sidebar toggle in the titlebar as a "fourth light":
+/// constrained to the zoom button with the lights' own gap, it shows and
+/// hides exactly when they do.
 private struct TrafficLightInset: NSViewRepresentable {
     var buttonsHidden: Bool
+    var isSidebarVisible: Bool
+    var onToggleSidebar: () -> Void
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -391,6 +407,7 @@ private struct TrafficLightInset: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.setButtonsHidden(buttonsHidden)
+        context.coordinator.updateToggle(isSidebarVisible: isSidebarVisible, action: onToggleSidebar)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -399,6 +416,9 @@ private struct TrafficLightInset: NSViewRepresentable {
     final class Coordinator {
         private weak var window: NSWindow?
         private var buttonsHidden = false
+        private var isSidebarVisible = true
+        private var toggleAction: () -> Void = {}
+        private var toggleHost: NSHostingView<TitlebarSidebarToggle>?
 
         func attach(to window: NSWindow?) {
             guard let window, self.window !== window else { return }
@@ -413,6 +433,7 @@ private struct TrafficLightInset: NSViewRepresentable {
             window.toolbarStyle = .unified
             window.titlebarAppearsTransparent = true
 
+            installToggle(in: window)
             applyVisibility(animated: false)
         }
 
@@ -420,6 +441,48 @@ private struct TrafficLightInset: NSViewRepresentable {
             guard hidden != buttonsHidden else { return }
             buttonsHidden = hidden
             applyVisibility(animated: true)
+            pushToggleState()
+        }
+
+        func updateToggle(isSidebarVisible: Bool, action: @escaping () -> Void) {
+            self.isSidebarVisible = isSidebarVisible
+            self.toggleAction = action
+            pushToggleState()
+        }
+
+        /// Seats the toggle in the titlebar view, pinned to the zoom button
+        /// with the same gap the lights keep between themselves — AppKit
+        /// moves the lights, the constraint drags the toggle along.
+        private func installToggle(in window: NSWindow) {
+            guard
+                toggleHost == nil,
+                let close = window.standardWindowButton(.closeButton),
+                let mini = window.standardWindowButton(.miniaturizeButton),
+                let zoom = window.standardWindowButton(.zoomButton),
+                let titlebar = zoom.superview
+            else { return }
+
+            let host = NSHostingView(rootView: currentToggleState())
+            host.translatesAutoresizingMaskIntoConstraints = false
+            titlebar.addSubview(host)
+            let gap = mini.frame.minX - close.frame.maxX
+            NSLayoutConstraint.activate([
+                host.leadingAnchor.constraint(equalTo: zoom.trailingAnchor, constant: gap),
+                host.centerYAnchor.constraint(equalTo: zoom.centerYAnchor),
+            ])
+            toggleHost = host
+        }
+
+        private func pushToggleState() {
+            toggleHost?.rootView = currentToggleState()
+        }
+
+        private func currentToggleState() -> TitlebarSidebarToggle {
+            TitlebarSidebarToggle(
+                isSidebarVisible: isSidebarVisible,
+                isConcealed: buttonsHidden,
+                action: toggleAction
+            )
         }
 
         private func applyVisibility(animated: Bool) {
@@ -439,6 +502,22 @@ private struct TrafficLightInset: NSViewRepresentable {
             // Invisible buttons must not swallow clicks over the terminal.
             buttons.forEach { $0.isEnabled = !buttonsHidden }
         }
+    }
+}
+
+/// Titlebar wrapper for the sidebar toggle: fades in step with the traffic
+/// lights (SwiftUI-side, so AppKit alpha animation never fights the hosting
+/// view) and stops taking clicks while concealed.
+private struct TitlebarSidebarToggle: View {
+    var isSidebarVisible: Bool
+    var isConcealed: Bool
+    var action: () -> Void
+
+    var body: some View {
+        SidebarToggleButton(isSidebarVisible: isSidebarVisible, action: action)
+            .opacity(isConcealed ? 0 : 1)
+            .allowsHitTesting(!isConcealed)
+            .animation(.easeOut(duration: isConcealed ? 0.15 : 0.2), value: isConcealed)
     }
 }
 
