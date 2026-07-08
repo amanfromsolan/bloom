@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Builds and launches the Debug build ("Bloom Dev", bundle id
+# Builds and launches the Debug build ("Bloom Nightly", bundle id
 # com.amanchaudhary.bloom.debug) alongside the installed release Bloom.
 # Everything here is scoped to the DerivedData copy by full executable
 # path — never by process name, which the installed Bloom shares.
