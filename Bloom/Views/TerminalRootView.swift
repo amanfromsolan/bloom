@@ -28,7 +28,13 @@ struct TerminalRootView: View {
                     SidebarView(store: store, spaceEditor: $spaceEditor)
                 }
                 .frame(width: 248)
-                .transition(.move(edge: .leading).combined(with: .opacity))
+                // Pinned from a peek, the panel is already on screen, so it
+                // appears in place. Shown cold (⌘B), it slides in.
+                .transition(
+                    isPeeking
+                        ? .identity
+                        : .move(edge: .leading).combined(with: .opacity)
+                )
             }
 
             // Terminal floats as an inset card on the frosted window.
@@ -75,9 +81,9 @@ struct TerminalRootView: View {
                     trailing: 10
                 ))
         }
-        // Pinning while peeked swaps the overlay for the real sidebar in
-        // place — animating would slide in a panel that's already on screen,
-        // so that path commits instantly. Toggles without a peek (⌘B) keep
+        // Pinning while peeked commits instantly: the panel is already on
+        // screen, and animating the terminal's resize makes its Metal
+        // surface flash a stale frame. Toggles without a peek (⌘B) keep
         // the spring.
         .animation(
             isPeeking ? nil : .spring(duration: 0.28, bounce: 0.12),
@@ -269,8 +275,10 @@ struct TerminalRootView: View {
         .frame(width: 248)
         .frame(maxHeight: .infinity)
         .background(
+            // Same tint the pinned sidebar sits on, so pinning from a peek
+            // doesn't shift the panel's brightness.
             SidebarMaterial()
-                .overlay(Color.black.opacity(0.55))
+                .overlay(Color.black.opacity(0.38))
         )
         .overlay(alignment: .trailing) {
             Rectangle()
