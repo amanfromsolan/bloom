@@ -8,6 +8,11 @@ struct TerminalRootView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var spaceEditor: SpaceEditorSheet.Mode?
     @State private var isPeeking = false
+    // Card corner radius, kept concentric with the window's own curve so the
+    // frame reads as one shape. Read live off the NSWindow (see
+    // WindowCornerRadiusReader); starts at the fixed floor and only grows once
+    // the window reports a larger radius, so a failed read stays put.
+    @State private var cardCornerRadius: CGFloat = WindowCornerRadiusReader.inset
     @SceneStorage("selectedSessionID") private var storedSelection: String?
 
     var body: some View {
@@ -49,9 +54,9 @@ struct TerminalRootView: View {
             // Terminal floats as an inset card on the frosted window.
             TerminalWorkspaceView(store: store)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
                 )
                 .shadow(color: .black.opacity(0.22), radius: 12, y: 3)
@@ -61,7 +66,7 @@ struct TerminalRootView: View {
                             // Dim the terminal behind the HUD; purely visual,
                             // so it never swallows a stray click.
                             Color.black.opacity(0.35)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
                                 .allowsHitTesting(false)
 
                             TabSwitcherHUD(switcher: switcher, store: store)
@@ -101,6 +106,9 @@ struct TerminalRootView: View {
             isSidebarVisible: store.isSidebarVisible,
             onToggleSidebar: { store.isSidebarVisible.toggle() }
         ))
+        // Publishes the window's live corner radius up into the card radius so
+        // the two curves stay concentric.
+        .background(WindowCornerRadiusReader { cardCornerRadius = $0 })
         .background(
             SidebarMaterial()
                 .overlay(Color.black.opacity(0.38))
@@ -402,6 +410,133 @@ private struct PeekMouseMonitor: NSViewRepresentable {
             if let monitor {
                 NSEvent.removeMonitor(monitor)
             }
+        }
+    }
+}
+
+/// Reads the window's live corner radius and hands back the card radius that
+/// nests concentrically inside it: `windowRadius − inset`, floored at the old
+/// fixed 10 so macOS 15 (square-ish window) keeps today's exact look. macOS 26
+/// with the unified toolbar reports a noticeably larger radius, so the card
+/// comes out visibly rounder than 10.
+///
+/// The window is AppKit-side, so a hidden representable pulls it from
+/// `view.window` and publishes it up. The read uses the same defensive KVC
+/// pattern Ghostty uses (see TerminalViewContainer.windowCornerRadius):
+/// `responds(to:)`-guarded and typed as an optional, so a missing or renamed
+/// private API fails open to the fixed radius instead of crashing.
+private struct WindowCornerRadiusReader: NSViewRepresentable {
+    /// Card inset from the window edge; also the floor for the computed radius.
+    static let inset: CGFloat = 10
+
+    let onChange: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.onChange = onChange
+        // The window isn't wired up yet inside makeNSView; wait a runloop.
+        DispatchQueue.main.async {
+            context.coordinator.attach(to: view.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onChange = onChange
+        // If the window arrived after makeNSView, this catches it.
+        context.coordinator.attach(to: nsView.window)
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    @MainActor
+    final class Coordinator {
+        var onChange: (CGFloat) -> Void = { _ in }
+        private weak var window: NSWindow?
+        private var observers: [NSObjectProtocol] = []
+        /// Last value handed up; publish only on change so the double-read
+        /// below doesn't churn SwiftUI state.
+        private var lastPublished: CGFloat?
+
+        func attach(to window: NSWindow?) {
+            guard let window, self.window !== window else { return }
+            self.window = window
+
+            // The radius shifts with window state: fullscreen squares it off,
+            // and becoming key is a safe point to re-read once the toolbar
+            // (which bumps the radius) has settled.
+            let center = NotificationCenter.default
+            for name in [
+                NSWindow.didBecomeKeyNotification,
+                NSWindow.didEnterFullScreenNotification,
+                NSWindow.didExitFullScreenNotification,
+            ] {
+                let token = center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.publish() }
+                }
+                observers.append(token)
+            }
+
+            // The attach-time read races window setup: launched unfocused,
+            // AppKit hasn't settled _cornerRadius yet, the read comes back at
+            // the floor, and didBecomeKey — the only re-read — never fires
+            // until the window is first focused, so the card sat wrong from
+            // launch. A short, fixed burst of deferred re-reads (next tick,
+            // then ~0.1s and ~0.5s) covers however late setup lands; publish-
+            // on-change makes the extras free, and the burst ends — no
+            // permanent polling.
+            publishIfChanged()
+            for delay in [0.1, 0.5] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.publishIfChanged()
+                }
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.publishIfChanged()
+            }
+        }
+
+        /// Reads now and once more on the next runloop tick: AppKit can settle
+        /// the private radius slightly after the notification fires. Two cheap
+        /// reads, no timers; the change guard keeps SwiftUI writes to a minimum.
+        private func publish() {
+            publishIfChanged()
+            DispatchQueue.main.async { [weak self] in
+                self?.publishIfChanged()
+            }
+        }
+
+        private func publishIfChanged() {
+            let radius = Self.cardRadius(for: window)
+            guard radius != lastPublished else { return }
+            lastPublished = radius
+            onChange(radius)
+        }
+
+        /// Read-only private API, the same defensive KVC read Ghostty uses;
+        /// fails open to the fixed inset radius when the key is absent.
+        static func cardRadius(for window: NSWindow?) -> CGFloat {
+            guard
+                let window,
+                window.responds(to: Selector(("_cornerRadius"))),
+                let radius = window.value(forKey: "_cornerRadius") as? CGFloat
+            else {
+                return WindowCornerRadiusReader.inset
+            }
+            return max(WindowCornerRadiusReader.inset, radius - WindowCornerRadiusReader.inset)
+        }
+
+        func stop() {
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
+            observers.removeAll()
+        }
+
+        deinit {
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
         }
     }
 }
