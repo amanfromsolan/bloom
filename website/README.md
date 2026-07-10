@@ -5,6 +5,16 @@ directly, or serve the directory to exercise the root-relative asset paths:
 
     python3 -m http.server 8000
 
+## The download link is pinned
+
+"Download for Mac" points at a specific release asset. It has to: GitHub's
+unpinned `/releases/latest/download/<name>` needs a stable filename, and our
+assets embed the version (`Enso-0.8.0.dmg`). So after cutting a release, bump
+both the `href` and the version in `.meta` in `index.html`, then redeploy.
+
+Serving a stable `Enso.dmg` asset alongside the versioned one would let the link
+become evergreen.
+
 ## Deployment
 
 Served by Caddy on `hetzner_takumi` from a checkout of this repo. The server has
