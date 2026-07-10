@@ -35,12 +35,12 @@ struct TerminalRootView: View {
                     WindowDragHandle().frame(height: 40)
                 }
                 .frame(width: store.sidebarWidth)
-                // Drag the trailing edge to resize. Inset below the top 40pt
-                // so the handle never steals the window-drag strip up in the
-                // traffic-light row.
+                // Drag the trailing edge to resize. The handle spans the full
+                // height and insets its own hit strip below the top 40pt so it
+                // never steals the window-drag strip up in the traffic-light
+                // row, while its indicator can still reach the card's top.
                 .overlay(alignment: .trailing) {
                     SidebarResizeHandle(store: store)
-                        .padding(.top, 40)
                 }
                 // Pinned from a peek, the panel is already on screen, so it
                 // appears in place. Shown cold (⌘B), it slides in.
@@ -75,9 +75,13 @@ struct TerminalRootView: View {
                     }
                 }
                 .animation(.easeOut(duration: 0.12), value: switcher.isShowingHUD)
+                // No leading inset beside the sidebar: the card starts flush
+                // at the sidebar's trailing edge, so the resize handle sits
+                // exactly where the terminal begins instead of a gutter short
+                // of it.
                 .padding(EdgeInsets(
                     top: 10,
-                    leading: store.isSidebarVisible ? 6 : 10,
+                    leading: store.isSidebarVisible ? 0 : 10,
                     bottom: 10,
                     trailing: 10
                 ))
@@ -678,7 +682,7 @@ private struct TitlebarSidebarToggle: View {
 }
 
 /// Trailing-edge grip that drag-resizes the sidebar. An 8pt hit strip with a
-/// 1pt hairline that only shows while hovered or dragging; the drag writes
+/// 3pt capsule that only shows while hovered or dragging; the drag writes
 /// store.sidebarWidth live (the store clamps to its min/max). Shows the
 /// standard horizontal-resize cursor over the strip.
 private struct SidebarResizeHandle: View {
@@ -692,25 +696,39 @@ private struct SidebarResizeHandle: View {
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            // Invisible grab area straddling the edge; wider than the hairline
-            // so the pointer catches it without pixel-hunting.
+            // Visible indicator: rides the card's full vertical run — the
+            // card is inset 10pt from the window top and bottom, so the
+            // capsule matches its height. Purely visual; hit-testing stays
+            // with the grab strip so the top band keeps dragging the window.
+            Capsule()
+                .fill(Color.white.opacity(isActive ? 0.22 : 0))
+                .frame(width: 3)
+                .padding(.vertical, 10)
+                .allowsHitTesting(false)
+
+            // Invisible grab area at the edge; wider than the indicator so
+            // the pointer catches it without pixel-hunting. Starts below the
+            // top 40pt so it never steals the window-drag strip up in the
+            // traffic-light row.
             Color.clear
                 .frame(width: 8)
                 .contentShape(Rectangle())
-
-            Rectangle()
-                .fill(Color.white.opacity(isActive ? 0.22 : 0))
-                .frame(width: 1)
+                .overlay(ResizeCursor())
+                .onHover { isHovering = $0 }
+                .padding(.top, 40)
         }
         .frame(maxHeight: .infinity)
-        .overlay(ResizeCursor())
-        .onHover { isHovering = $0 }
         .gesture(
-            DragGesture(minimumDistance: 0)
+            // Track in global space: the handle rides the sidebar's trailing
+            // edge, so its own local space slides as the width changes and a
+            // translation read there oscillates. Global coordinates stay put
+            // under the pointer, so the delta from the drag's start location is
+            // stable frame to frame.
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { value in
                     let base = dragStartWidth ?? store.sidebarWidth
                     if dragStartWidth == nil { dragStartWidth = base }
-                    store.setSidebarWidth(base + value.translation.width)
+                    store.setSidebarWidth(base + (value.location.x - value.startLocation.x))
                 }
                 .onEnded { _ in dragStartWidth = nil }
         )

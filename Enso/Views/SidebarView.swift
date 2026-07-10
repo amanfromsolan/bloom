@@ -429,24 +429,23 @@ private struct SpacePage: View {
             // Always laid out, faded on hover: conditionally inserting the
             // 18pt controls changes the row height and jolts the sidebar.
             Group {
+                // Collapse/expand-all toggle, left of the ⋯ menu. Only present
+                // when the space has folders to fold; laid out alongside the
+                // menu so the header height never shifts.
+                if !space.pinnedFolders.isEmpty {
+                    FolderFoldToggle(
+                        collapsed: allFoldersCollapsed,
+                        onCollapse: { store.collapseAllFolders(inSpace: space.id) },
+                        onExpand: { store.expandAllFolders(inSpace: space.id) }
+                    )
+                }
+
                 Menu {
                     Button("Rename", systemImage: "pencil") {
                         beginSpaceRename()
                     }
                     Button("Edit Icon & Name…", systemImage: "pencil.and.outline") {
                         onEditSpace(space)
-                    }
-                    // Bulk folder controls, shown only when the space has any.
-                    if !space.pinnedFolders.isEmpty {
-                        Divider()
-                        Button("Collapse All Folders", systemImage: "chevron.right") {
-                            store.collapseAllFolders(inSpace: space.id)
-                        }
-                        .disabled(allFoldersCollapsed)
-                        Button("Expand All Folders", systemImage: "chevron.down") {
-                            store.expandAllFolders(inSpace: space.id)
-                        }
-                        .disabled(allFoldersExpanded)
                     }
                     Divider()
                     Button("Delete Space", systemImage: "trash") {
@@ -462,6 +461,11 @@ private struct SpacePage: View {
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
+                // Without fixedSize the borderless popup cell still reserves
+                // trailing indicator width, so the 18pt frame centers a wider
+                // cell and shoves the glyph left; fixedSize lets the reclaimed
+                // label be its true size and sit dead-center.
+                .fixedSize()
                 .frame(width: 18, height: 18)
                 .background(
                     RoundedRectangle(cornerRadius: 4)
@@ -485,14 +489,10 @@ private struct SpacePage: View {
         .padding(.bottom, 4)
     }
 
-    /// Every folder in this space is collapsed — nothing left to collapse.
+    /// Every folder in this space is collapsed — the toggle then offers to
+    /// expand rather than collapse.
     private var allFoldersCollapsed: Bool {
         space.pinnedFolders.allSatisfy { store.collapsedFolderIDs.contains($0.id) }
-    }
-
-    /// Every folder in this space is expanded — nothing left to expand.
-    private var allFoldersExpanded: Bool {
-        space.pinnedFolders.allSatisfy { !store.collapsedFolderIDs.contains($0.id) }
     }
 
     private func beginSpaceRename() {
@@ -1170,6 +1170,35 @@ private struct HoverIconButton: View {
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .help(help)
+    }
+}
+
+/// Collapse/expand-all-folders toggle for the space header. Shows the inward
+/// chevrons while any folder is open (click folds everything) and flips to the
+/// outward chevrons once all are folded (click reopens). Custom template
+/// assets so they tint like the neighboring SF Symbols; same 18pt frame and
+/// hover wash as HoverIconButton.
+private struct FolderFoldToggle: View {
+    let collapsed: Bool
+    let onCollapse: () -> Void
+    let onExpand: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: collapsed ? onExpand : onCollapse) {
+            Image(collapsed ? "ExpandFolders" : "CollapseFolders")
+                .renderingMode(.template)
+                .foregroundStyle(.white.opacity(isHovered ? 0.9 : 0.55))
+                .frame(width: 18, height: 18)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(isHovered ? 0.12 : 0))
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help(collapsed ? "Expand All Folders" : "Collapse All Folders")
     }
 }
 
