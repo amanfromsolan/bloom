@@ -1552,6 +1552,15 @@ struct SpaceEditorSheet: View {
         case emoji
     }
 
+    /// What the icon disc is showing: the space's icon, or the hover-state
+    /// plus. One keyed identity means the hover swap rides exactly the same
+    /// iconSwap transition as a shuffle, and a shuffle mid-hover can't fight
+    /// it — each change is just a new key.
+    private enum DiscContent: Hashable {
+        case icon(SidebarSpace.Icon)
+        case plus
+    }
+
     let mode: Mode
     let onSave: (String, SidebarSpace.Icon) -> Void
     let onDismiss: () -> Void
@@ -1564,6 +1573,12 @@ struct SpaceEditorSheet: View {
     /// Drives the shuffle button's squash-and-pop on each press.
     @State private var shufflePop = false
     @State private var closeHovered = false
+    /// Icon disc hover: rings the disc in accent and swaps the icon for a
+    /// plus, signalling that the disc opens the picker.
+    @State private var iconHovered = false
+    /// The Icons/Emoji picker now floats in a popover anchored to the disc,
+    /// so the sheet stays compact instead of embedding the grids inline.
+    @State private var pickerPresented = false
     @FocusState private var nameFocused: Bool
 
     private let catalog = IconCatalog.shared
@@ -1590,11 +1605,7 @@ struct SpaceEditorSheet: View {
                 )
                 .onSubmit(saveAndDismiss)
                 .padding(.horizontal, 24)
-                .padding(.bottom, 16)
-
-            picker
-                .padding(.horizontal, 24)
-                .padding(.bottom, 20)
+                .padding(.bottom, 22)
 
             // Bottom-aligned footer, web-modal style: two equal-width
             // solid buttons spanning the sheet.
@@ -1620,7 +1631,7 @@ struct SpaceEditorSheet: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 24)
         }
-        .frame(width: 420)
+        .frame(width: 340)
         .overlay(alignment: .topTrailing) {
             Button {
                 onDismiss()
@@ -1663,25 +1674,72 @@ struct SpaceEditorSheet: View {
 
     private var iconPreview: some View {
         ZStack(alignment: .bottomTrailing) {
+            iconDisc
+            shuffleButton
+                .offset(x: 4, y: 4)
+        }
+        // Every disc change — shuffle, tile tap, or the hover plus — rides
+        // the same spring, so the preview always animates its swap.
+        .animation(.spring(duration: 0.32, bounce: 0.32), value: discContent)
+    }
+
+    /// The clickable icon well. It opens the picker popover; on hover a ring
+    /// thickens in and the icon swaps out for a plus, reading as "change".
+    private var iconDisc: some View {
+        Button {
+            pickerPresented = true
+        } label: {
             ZStack {
                 // Recessed well so the preview reads as a distinct disc.
                 Circle()
                     .fill(Color.black.opacity(0.32))
 
-                // Keyed on the icon so a swap plays the shrink-out /
-                // spring-in transition instead of cross-fading in place.
-                SpaceIndicatorIcon(icon: icon, isActive: true, size: 46)
-                    .id(icon)
-                    .transition(iconSwap)
+                // Keyed on what's showing, so every swap — a shuffle or the
+                // hover plus — plays the shrink-out / spring-in transition
+                // instead of cross-fading in place.
+                Group {
+                    switch discContent {
+                    case .icon(let current):
+                        SpaceIndicatorIcon(icon: current, isActive: true, size: 46)
+                    case .plus:
+                        // Sized like the space icon it stands in for.
+                        Image(systemName: "plus")
+                            .font(.system(size: 28, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                }
+                .id(discContent)
+                .transition(iconSwap)
             }
             .frame(width: 84, height: 84)
-
-            shuffleButton
-                .offset(x: 4, y: 4)
+            // Faint ring marks the disc as the picker's trigger: its stroke
+            // grows from nothing on hover, so it thickens in rather than fades.
+            .overlay(
+                Circle()
+                    .stroke(
+                        Color.white.opacity(0.2),
+                        style: StrokeStyle(lineWidth: iconHovered ? 2 : 0)
+                    )
+                    .animation(.easeInOut(duration: 0.14), value: iconHovered)
+            )
+            .contentShape(Circle())
         }
-        // Every icon change (shuffle or a tile tap) rides the same spring,
-        // so the preview always animates its swap.
-        .animation(.spring(duration: 0.32, bounce: 0.32), value: icon)
+        .buttonStyle(IconDiscButtonStyle(hovered: iconHovered))
+        .onHover { hovering in
+            iconHovered = hovering
+            // Pointing-hand cursor confirms the disc is clickable.
+            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        // Anchored below the disc; the picker keeps all its original
+        // functionality, just floated instead of embedded.
+        .popover(isPresented: $pickerPresented, arrowEdge: .bottom) {
+            pickerPopover
+        }
+    }
+
+    /// What the disc currently shows; hover trumps the icon.
+    private var discContent: DiscContent {
+        iconHovered ? .plus : .icon(icon)
     }
 
     private var shuffleButton: some View {
@@ -1740,25 +1798,32 @@ struct SpaceEditorSheet: View {
                 prompt: pickerTab == .icons ? "Search icons" : "Search emoji"
             )
 
-            // A fixed height keeps the sheet from growing with the catalog;
-            // the grids scroll within it.
+            // Fills the popover; the grids scroll within whatever space is left.
             Group {
                 switch pickerTab {
                 case .icons: iconsGrid
                 case .emoji: emojiGrid
                 }
             }
-            .frame(height: 208)
+            .frame(maxHeight: .infinity)
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .stroke(Color.white.opacity(0.07), lineWidth: 1)
-                )
-        )
+    }
+
+    /// The picker, floated in a popover anchored to the icon disc. The
+    /// NSPopover chrome is system-drawn; a dark presentation background plus
+    /// forced dark scheme keep it from coming up glaring white against Enso.
+    private var pickerPopover: some View {
+        picker
+            .padding(14)
+            .frame(width: 340, height: 380)
+            .background(popoverBackground)
+            .presentationBackground(popoverBackground)
+            .colorScheme(.dark)
+    }
+
+    /// Matches the sheet's own near-black fill.
+    private var popoverBackground: Color {
+        Color(red: 0.094, green: 0.096, blue: 0.105)
     }
 
     private var tabBar: some View {
@@ -1824,7 +1889,7 @@ struct SpaceEditorSheet: View {
             LazyVGrid(columns: gridColumns, spacing: 6) {
                 ForEach(filteredIconTiles) { tile in
                     tileButton(isSelected: icon == tile.icon) {
-                        icon = tile.icon
+                        select(tile.icon)
                     } content: {
                         SpaceIndicatorIcon(icon: tile.icon, isActive: true, size: 22)
                     }
@@ -1860,7 +1925,7 @@ struct SpaceEditorSheet: View {
 
     private func emojiTile(_ entry: EmojiEntry) -> some View {
         tileButton(isSelected: icon == .emoji(entry.emoji)) {
-            icon = .emoji(entry.emoji)
+            select(.emoji(entry.emoji))
         } content: {
             Text(entry.emoji)
                 .font(.system(size: 20))
@@ -1880,7 +1945,8 @@ struct SpaceEditorSheet: View {
     }
 
     /// One selectable grid cell: a rounded well that fills with the accent
-    /// when it holds the current icon.
+    /// when it holds the current icon. Hover and press chrome live in the
+    /// button style, which keeps its own per-tile state.
     private func tileButton<Content: View>(
         isSelected: Bool,
         action: @escaping () -> Void,
@@ -1889,17 +1955,8 @@ struct SpaceEditorSheet: View {
         Button(action: action) {
             content()
                 .frame(width: 38, height: 34)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(isSelected ? Color.accentColor.opacity(0.85) : Color.white.opacity(0.04))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.white.opacity(isSelected ? 0.5 : 0), lineWidth: 1)
-                )
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PickerTileStyle(isSelected: isSelected))
     }
 
     // MARK: Filtering
@@ -1928,6 +1985,13 @@ struct SpaceEditorSheet: View {
 
     // MARK: Save
 
+    /// Applies a picked tile and closes the popover — close-on-pick keeps the
+    /// flow tight; the disc reopens it for another change.
+    private func select(_ newIcon: SidebarSpace.Icon) {
+        icon = newIcon
+        pickerPresented = false
+    }
+
     private func saveAndDismiss() {
         onSave(name, icon)
         onDismiss()
@@ -1936,6 +2000,60 @@ struct SpaceEditorSheet: View {
     private var isCreating: Bool {
         if case .create = mode { return true }
         return false
+    }
+}
+
+/// Picker grid-tile chrome: accent fill when selected, a slightly brighter
+/// well plus a small swell on hover, and a settle back to rest while the
+/// mouse is down. Hover is per-tile @State inside the style, so hovering
+/// repaints one tile — never the whole lazy grid.
+private struct PickerTileStyle: ButtonStyle {
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        Styled(configuration: configuration, isSelected: isSelected)
+    }
+
+    private struct Styled: View {
+        let configuration: Configuration
+        let isSelected: Bool
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(
+                            isSelected
+                                ? Color.accentColor.opacity(0.85)
+                                : Color.white.opacity(hovering ? 0.09 : 0.04)
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.white.opacity(isSelected ? 0.5 : 0), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+                // Pressing brings the hovered swell back down to rest, so the
+                // click reads as a push into the grid.
+                .scaleEffect(configuration.isPressed ? 1 : (hovering ? 1.04 : 1))
+                .onHover { hovering = $0 }
+                .animation(.snappy(duration: 0.12), value: configuration.isPressed)
+                .animation(.easeInOut(duration: 0.14), value: hovering)
+        }
+    }
+}
+
+/// The icon disc's hover/press feel: swells a hair on hover, dips while the
+/// mouse is down — same snappy press timing as the modal buttons.
+private struct IconDiscButtonStyle: ButtonStyle {
+    let hovered: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : (hovered ? 1.05 : 1))
+            .animation(.snappy(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeInOut(duration: 0.14), value: hovered)
     }
 }
 
