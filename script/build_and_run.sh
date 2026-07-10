@@ -10,7 +10,7 @@ MODE="${1:-run}"
 # Debug PRODUCT_NAME is "Enso Nightly" so the Dock and app menu carry the
 # nightly name; the Xcode target and scheme are still "Enso".
 APP_NAME="Enso Nightly"
-PROJECT="Enso.xcodeproj"
+PROJECT="macos/Enso.xcodeproj"
 SCHEME="Enso"
 CONFIGURATION="Debug"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -39,7 +39,7 @@ IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
 BUILD_NUM=$((MAJOR * 10000 + MINOR * 100 + PATCH))
 
 echo "==> Building Release v$VERSION (build $BUILD_NUM) with hardened runtime"
-xcodebuild -project Enso.xcodeproj -scheme Enso -configuration Release \
+xcodebuild -project macos/Enso.xcodeproj -scheme Enso -configuration Release \
     -derivedDataPath "$BUILD_DIR" \
     CODE_SIGN_STYLE=Manual \
     CODE_SIGN_IDENTITY="$IDENTITY" \
@@ -67,7 +67,7 @@ for HELPER in \
 done
 codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE_FW"
 codesign --force --options runtime --timestamp \
-    --entitlements Enso/Enso.entitlements --sign "$IDENTITY" "$APP"
+    --entitlements macos/Enso/Enso.entitlements --sign "$IDENTITY" "$APP"
 
 codesign --verify --deep --strict "$APP"
 echo "==> Signed as: $(codesign -dvv "$APP" 2>&1 | grep '^Authority' | head -1)"

@@ -47,7 +47,8 @@ Enso embeds [Ghostty](https://github.com/ghostty-org/ghostty)'s `GhosttyKit.xcfr
 ```sh
 git clone https://github.com/ghostty-org/ghostty references/ghostty
 cd references/ghostty && zig build -Doptimize=ReleaseFast -Demit-macos-app=false
-cd ../.. && xcodebuild -project Enso.xcodeproj -scheme Enso build
+cd ../.. && ln -s ../references/ghostty/macos/GhosttyKit.xcframework macos/GhosttyKit.xcframework
+xcodebuild -project macos/Enso.xcodeproj -scheme Enso build
 ```
 
 `script/release.sh` cuts a signed, notarized DMG (needs a Developer ID certificate and a `notarytool` keychain profile).

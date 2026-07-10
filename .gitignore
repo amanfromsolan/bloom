@@ -2,7 +2,7 @@ build/
 DerivedData/
 *.xcuserstate
 *.xcuserdata/
-Enso.xcodeproj/xcuserdata/
+macos/Enso.xcodeproj/xcuserdata/
 references/
 GhosttyKit.xcframework
 default.profraw
