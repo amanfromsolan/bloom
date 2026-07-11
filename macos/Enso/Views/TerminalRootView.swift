@@ -147,9 +147,9 @@ struct TerminalRootView: View {
         .overlay(alignment: .top) {
             if commandCenter.isOpen {
                 ZStack(alignment: .top) {
-                    // Scrim: dims the window and swallows clicks outside the
+                    // Scrim: invisible, but swallows clicks outside the
                     // palette to dismiss.
-                    Color.black.opacity(0.4)
+                    Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { commandCenter.close() }
                         .ignoresSafeArea()
@@ -166,7 +166,7 @@ struct TerminalRootView: View {
                         // never moves as results grow or shrink.
                         CommandCenterView(center: commandCenter)
                             .frame(height: 480, alignment: .top)
-                            .padding(.top, 90)
+                            .padding(.bottom, 110)
                             .frame(maxWidth: .infinity)
                     }
                 }

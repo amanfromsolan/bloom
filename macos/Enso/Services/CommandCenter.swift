@@ -3,9 +3,10 @@ import Combine
 import SwiftUI
 
 /// The ⌘T/⌘P command center: one fuzzy palette over tabs, spaces, and
-/// commands. Empty query shows recent tabs and spaces with "New Tab" as the
-/// default Enter action; typing filters across everything at once. The first
-/// nine rows get ⌘1–9 quick-select shortcuts.
+/// commands, grouped into "Recent Tabs", "Spaces", and "Commands" sections.
+/// The empty sheet preselects the top recent tab (Enter jumps back to it) and
+/// offers a short command menu; typing filters across everything at once, each
+/// section sorted by score. The first nine rows keep ⌘1–9 quick-select.
 @MainActor
 final class CommandCenter: ObservableObject {
     static let shared = CommandCenter()
@@ -36,7 +37,7 @@ final class CommandCenter: ObservableObject {
 
     var inputPlaceholder: String {
         switch mode {
-        case .search: "Search tabs, spaces, commands…"
+        case .search: "Search tabs, commands or processes"
         case .renameTab: "New tab name…"
         case .renameSpace: "New space name…"
         }
@@ -257,50 +258,74 @@ final class CommandCenter: ObservableObject {
             // VS Code-style command filter: "> " shows commands only.
             let commandQuery = trimmed.dropFirst().trimmingCharacters(in: .whitespaces)
             let commands = commandItems(in: store)
-            if commandQuery.isEmpty {
-                items = commands
-            } else {
-                items = commands
-                    .compactMap { item -> (PaletteItem, Int)? in
-                        guard let score = Self.fuzzyScore(query: commandQuery, in: item.title) else { return nil }
-                        return (item, score)
-                    }
-                    .sorted { $0.1 > $1.1 }
-                    .map(\.0)
-            }
+            items = commandQuery.isEmpty ? commands : Self.filter(commands, query: commandQuery)
         } else if trimmed.isEmpty {
-            // Default sheet: New Tab first (Enter does the obvious thing),
-            // then recent tabs everywhere, then spaces.
-            items = newTabItems(in: store)
-                + tabItems(in: store).prefix(6)
-                + spaceItems(in: store)
+            // Default sheet mirrors the mock: four recent tabs from the
+            // current space (the top one is preselected so Enter jumps back
+            // to where you were), then a short "Commands" menu, with other
+            // spaces below the fold.
+            items = Array(recentTabItems(in: store).prefix(4))
+                + menuCommandItems(in: store)
+                + extraSpaceItems(in: store)
         } else {
-            let candidates = tabItems(in: store)
-                + spaceItems(in: store)
-                + commandItems(in: store)
-            items = candidates
-                .compactMap { item -> (PaletteItem, Int)? in
-                    guard let score = Self.fuzzyScore(query: trimmed, in: item.title) else { return nil }
-                    return (item, score)
-                }
-                .sorted { $0.1 > $1.1 }
-                .map(\.0)
+            // Filtered results stay grouped by kind so section headers read
+            // cleanly: tabs, then spaces, then commands — each sorted by score.
+            items = Self.filter(tabItems(in: store), query: trimmed)
+                + Self.filter(spaceItems(in: store), query: trimmed)
+                + Self.filter(commandItems(in: store), query: trimmed)
         }
         highlightedIndex = 0
     }
 
+    /// Fuzzy-filters items by title and sorts the survivors by score.
+    private static func filter(_ candidates: [PaletteItem], query: String) -> [PaletteItem] {
+        candidates
+            .compactMap { item -> (PaletteItem, Int)? in
+                guard let score = fuzzyScore(query: query, in: item.title) else { return nil }
+                return (item, score)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map(\.0)
+    }
+
+    /// Every tab across all spaces, recency-ordered — the search corpus.
     private func tabItems(in store: TerminalSessionStore) -> [PaletteItem] {
         store.recencyOrderedSessionsAcrossSpaces().map { session, space in
-            PaletteItem(
-                id: "tab-\(session.id)",
-                icon: .accent(session.accent.color),
-                title: session.title,
-                context: space.name,
-                verb: "Switch"
-            ) { [weak store] in
-                store?.reveal(session.id)
-            }
+            tabItem(for: session, in: space, store: store)
         }
+    }
+
+    /// The default sheet's "Recent Tabs": current space only.
+    private func recentTabItems(in store: TerminalSessionStore) -> [PaletteItem] {
+        let space = store.activeSpace
+        return store.recencyOrderedSessions(inSpace: space.id).map { session in
+            tabItem(for: session, in: space, store: store)
+        }
+    }
+
+    private func tabItem(
+        for session: TerminalSession,
+        in space: SidebarSpace,
+        store: TerminalSessionStore
+    ) -> PaletteItem {
+        let folder = Self.folder(of: session.id, in: space)
+        return PaletteItem(
+            id: "tab-\(session.id)",
+            icon: .accent(session.accent.color),
+            title: session.title,
+            context: folder?.title,
+            contextSymbol: folder == nil ? nil : "folder",
+            verb: "Switch",
+            section: .recentTabs,
+            kindLabel: "Tab"
+        ) { [weak store] in
+            store?.reveal(session.id)
+        }
+    }
+
+    /// The sidebar folder a tab lives in, if any.
+    private static func folder(of sessionID: TerminalSession.ID, in space: SidebarSpace) -> TerminalFolder? {
+        space.pinnedFolders.first { $0.sessions.contains { $0.id == sessionID } }
     }
 
     private func spaceItems(in store: TerminalSessionStore) -> [PaletteItem] {
@@ -309,37 +334,89 @@ final class CommandCenter: ObservableObject {
                 id: "space-\(space.id)",
                 icon: .space(space.icon),
                 title: space.name,
-                context: "Space",
-                verb: "Go"
+                context: nil,
+                verb: "Go",
+                section: .spaces,
+                kindLabel: "Space"
             ) { [weak store] in
                 store?.setActiveSpace(space.id)
             }
         }
     }
 
+    /// Spaces other than the active one — the only ones worth switching to
+    /// from the default sheet. Collapses the "Spaces" section when there is
+    /// nowhere else to go.
+    private func extraSpaceItems(in store: TerminalSessionStore) -> [PaletteItem] {
+        spaceItems(in: store).filter { $0.id != "space-\(store.activeSpaceID)" }
+    }
+
     private func newTabItems(in store: TerminalSessionStore) -> [PaletteItem] {
         var items: [PaletteItem] = []
-        // "In <folder>" first so Enter on the empty sheet continues where you are.
-        if let current = store.selectedSession {
+        items.append(PaletteItem(
+            id: "cmd-new-tab",
+            icon: .symbol("plus.square"),
+            title: "New Tab",
+            context: nil,
+            verb: "Open"
+        ) { [weak store] in
+            store?.createSession(workingDirectory: NSHomeDirectory())
+        })
+        if let selection = store.selection,
+           let folder = Self.folder(of: selection, in: store.activeSpace) {
+            // The selected tab lives in a sidebar folder: new siblings go
+            // into that folder.
+            items.append(PaletteItem(
+                id: "cmd-new-tab-folder",
+                icon: .symbol("folder.badge.plus"),
+                title: "New Tab in Current Folder",
+                context: folder.title,
+                contextSymbol: "folder",
+                verb: "Open"
+            ) { [weak store] in
+                store?.createSession(inFolder: folder.id)
+            })
+        } else if let current = store.selectedSession {
+            // Loose tab: "folder" means the working directory instead.
             let cwd = current.workingDirectory
             items.append(PaletteItem(
                 id: "cmd-new-tab-cwd",
-                icon: .symbol("plus"),
-                title: "New Terminal in Current Folder",
+                icon: .symbol("folder.badge.plus"),
+                title: "New Tab in Current Folder",
                 context: Self.folderName(for: cwd),
                 verb: "Open"
             ) { [weak store] in
                 store?.createSession(besideSelectionWithWorkingDirectory: cwd)
             })
         }
+        return items
+    }
+
+    /// The short "Commands" menu shown under the recent tabs on the empty
+    /// sheet — the handful the mock surfaces, not the full command list
+    /// (that appears once you start typing).
+    private func menuCommandItems(in store: TerminalSessionStore) -> [PaletteItem] {
+        var items = newTabItems(in: store)
+        if store.selection != nil {
+            items.append(PaletteItem(
+                id: "cmd-auto-rename-tab",
+                icon: .symbol("pencil"),
+                title: "Auto Rename Tab",
+                context: nil,
+                verb: "Run"
+            ) { [weak store] in
+                guard let store, let selection = store.selection else { return }
+                TabAutoNamer.shared.forceName(selection)
+            })
+        }
         items.append(PaletteItem(
-            id: "cmd-new-tab",
-            icon: .symbol("plus"),
-            title: "New Terminal",
-            context: "Command",
-            verb: "Open"
-        ) { [weak store] in
-            store?.createSession(workingDirectory: NSHomeDirectory())
+            id: "cmd-settings",
+            icon: .symbol("gearshape"),
+            title: "Settings",
+            context: nil,
+            verb: "Run"
+        ) { [weak self] in
+            self?.openWindow?(id: SettingsPanel.windowID)
         })
         return items
     }
@@ -359,7 +436,7 @@ final class CommandCenter: ObservableObject {
             id: "cmd-new-folder",
             icon: .symbol("folder.badge.plus"),
             title: "New Folder",
-            context: "Command",
+            context: nil,
             verb: "Run"
         ) { [weak store] in
             store?.createFolder()
@@ -369,7 +446,7 @@ final class CommandCenter: ObservableObject {
             id: "cmd-new-space",
             icon: .symbol("rectangle.stack.badge.plus"),
             title: "New Space",
-            context: "Command",
+            context: nil,
             verb: "Run"
         ) { [weak store] in
             store?.createSpace(name: "", icon: .dot)
@@ -379,7 +456,7 @@ final class CommandCenter: ObservableObject {
             id: "cmd-check-updates",
             icon: .symbol("arrow.down.circle"),
             title: "Check for Updates",
-            context: "Command",
+            context: nil,
             verb: "Run"
         ) { [weak store] in
             // All update feedback lives in the sidebar card; surface it.
@@ -392,7 +469,7 @@ final class CommandCenter: ObservableObject {
                 id: "cmd-rename-tab",
                 icon: .symbol("pencil"),
                 title: "Rename Tab",
-                context: "Command",
+                context: nil,
                 verb: "Rename",
                 keepsOpen: true
             ) { [weak self] in
@@ -401,9 +478,9 @@ final class CommandCenter: ObservableObject {
 
             commands.append(PaletteItem(
                 id: "cmd-auto-rename-tab",
-                icon: .symbol("sparkles"),
-                title: "Auto-Rename Tab",
-                context: "Command",
+                icon: .symbol("pencil"),
+                title: "Auto Rename Tab",
+                context: nil,
                 verb: "Run"
             ) { [weak store] in
                 guard let store, let selection = store.selection else { return }
@@ -414,7 +491,7 @@ final class CommandCenter: ObservableObject {
                 id: "cmd-duplicate-tab",
                 icon: .symbol("plus.square.on.square"),
                 title: "Duplicate Tab",
-                context: "Command",
+                context: nil,
                 verb: "Open"
             ) { [weak store] in
                 guard let store, let selection = store.selection,
@@ -428,7 +505,7 @@ final class CommandCenter: ObservableObject {
                 id: "cmd-toggle-pin",
                 icon: .symbol(pinned ? "pin.slash" : "pin"),
                 title: pinned ? "Unpin Tab" : "Pin Tab",
-                context: "Command",
+                context: nil,
                 verb: "Run"
             ) { [weak store] in
                 guard let store, let selection = store.selection else { return }
@@ -443,7 +520,7 @@ final class CommandCenter: ObservableObject {
                 id: "cmd-close-tab",
                 icon: .symbol("xmark"),
                 title: "Close Tab",
-                context: "Command",
+                context: nil,
                 verb: "Run"
             ) { [weak store] in
                 store?.closeSelectedSession()
@@ -453,7 +530,7 @@ final class CommandCenter: ObservableObject {
                 id: "cmd-close-other-tabs",
                 icon: .symbol("xmark.circle"),
                 title: "Close Other Tabs",
-                context: "Command",
+                context: nil,
                 verb: "Run"
             ) { [weak store] in
                 guard let store, let selection = store.selection else { return }
@@ -466,7 +543,7 @@ final class CommandCenter: ObservableObject {
                 id: "cmd-copy-cwd",
                 icon: .symbol("doc.on.clipboard"),
                 title: "Copy Working Directory",
-                context: "Command",
+                context: nil,
                 verb: "Copy"
             ) { [weak store] in
                 guard let store, let selection = store.selection,
@@ -480,7 +557,7 @@ final class CommandCenter: ObservableObject {
                 id: "cmd-open-in-finder",
                 icon: .symbol("folder"),
                 title: "Open in Finder",
-                context: "Command",
+                context: nil,
                 verb: "Open"
             ) { [weak store] in
                 guard let store, let selection = store.selection,
@@ -494,7 +571,7 @@ final class CommandCenter: ObservableObject {
                     id: "cmd-move-\(space.id)",
                     icon: .space(space.icon),
                     title: "Move Tab to \(space.name)",
-                    context: "Command",
+                    context: nil,
                     verb: "Run"
                 ) { [weak store] in
                     guard let store, let selection = store.selection else { return }
@@ -508,7 +585,7 @@ final class CommandCenter: ObservableObject {
             id: "cmd-rename-space",
             icon: .symbol("pencil.and.outline"),
             title: "Rename Space",
-            context: "Command",
+            context: nil,
             verb: "Rename",
             keepsOpen: true
         ) { [weak self] in
@@ -519,7 +596,7 @@ final class CommandCenter: ObservableObject {
             id: "cmd-toggle-sidebar",
             icon: .symbol("sidebar.left"),
             title: store.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar",
-            context: "Command",
+            context: nil,
             verb: "Run"
         ) { [weak store] in
             store?.isSidebarVisible.toggle()
@@ -529,7 +606,7 @@ final class CommandCenter: ObservableObject {
             id: "cmd-settings",
             icon: .symbol("gearshape"),
             title: "Settings",
-            context: "Command",
+            context: nil,
             verb: "Run"
         ) { [weak self] in
             self?.openWindow?(id: SettingsPanel.windowID)
@@ -575,11 +652,26 @@ struct PaletteItem: Identifiable {
         case symbol(String)
     }
 
+    /// Drives the grouped section headers in the palette.
+    enum Section: String {
+        case recentTabs = "Recent Tabs"
+        case spaces = "Spaces"
+        case commands = "Commands"
+    }
+
     let id: String
     let icon: Icon
     let title: String
     let context: String?
+    /// Small SF Symbol shown before the trailing context text (e.g. a
+    /// folder glyph next to a folder name).
+    var contextSymbol: String? = nil
     let verb: String
+    /// Which grouped section this row falls under.
+    var section: Section = .commands
+    /// A dimmed suffix after the title naming the result kind ("Tab"),
+    /// shown when a bare title is ambiguous among mixed results.
+    var kindLabel: String? = nil
     /// Items that transition the palette (rename mode) instead of acting.
     var keepsOpen: Bool = false
     let perform: () -> Void
@@ -592,24 +684,51 @@ struct CommandCenterView: View {
     @FocusState private var searchFocused: Bool
     @Environment(\.openWindow) private var openWindow
 
+    // Palette-only typography: SF Compact (installed via Apple's SF font
+    // pack; bundle the faces before shipping). The variable "SF Compact"
+    // for titles, Text for small labels. Symbols stay on .system.
+    private func compactDisplay(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
+        .custom("SF Compact", size: size).weight(weight)
+    }
+
+    private func compactText(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
+        .custom("SF Compact Text", size: size).weight(weight)
+    }
+
+    // SwiftUI materials clamp to a grey floor even over pure black; the
+    // HUD material pinned to dark appearance is the darkest real blur
+    // macOS offers.
+    private struct BlurBackdrop: NSViewRepresentable {
+        func makeNSView(context: Context) -> NSVisualEffectView {
+            let view = NSVisualEffectView()
+            view.material = .hudWindow
+            view.blendingMode = .withinWindow
+            view.state = .active
+            view.appearance = NSAppearance(named: .darkAqua)
+            return view
+        }
+
+        func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: 14) {
                 Image(systemName: center.isRenaming ? "pencil" : "magnifyingglass")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .font(.system(size: 17, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.4))
 
                 TextField(center.inputPlaceholder, text: $center.query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 16))
+                    .font(compactDisplay(18))
                     .foregroundStyle(.white.opacity(0.92))
                     .focused($searchFocused)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 18)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 20)
 
             Rectangle()
-                .fill(Color.white.opacity(0.04))
+                .fill(Color.white.opacity(0.06))
                 .frame(height: 1)
 
             if center.isRenaming {
@@ -619,26 +738,35 @@ struct CommandCenterView: View {
                         .foregroundStyle(.white.opacity(0.2))
                     Text("esc Cancel")
                 }
-                .font(.system(size: 12, weight: .medium))
+                .font(compactText(12, .regular))
                 .foregroundStyle(.white.opacity(0.4))
                 .padding(.vertical, 14)
             } else if center.items.isEmpty {
                 Text("No matches")
-                    .font(.system(size: 13))
+                    .font(compactText(13))
                     .foregroundStyle(.white.opacity(0.35))
                     .padding(.vertical, 24)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(spacing: 2) {
+                        VStack(alignment: .leading, spacing: 2) {
                             ForEach(Array(center.items.enumerated()), id: \.element.id) { index, item in
+                                if index == 0 || center.items[index - 1].section != item.section {
+                                    sectionHeader(item.section.rawValue, isFirst: index == 0)
+                                }
                                 row(item, at: index)
                                     .id(item.id)
                             }
                         }
-                        .padding(8)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
+                        .padding(.bottom, 12)
                     }
-                    .frame(maxHeight: 420)
+                    .frame(maxHeight: 440)
+                    // Inset the viewport itself: scrollTo pins the last row
+                    // to the viewport's bottom edge, so in-content padding
+                    // alone never shows under it.
+                    .padding(.bottom, 10)
                     .onChange(of: center.highlightedIndex) { _, index in
                         guard center.items.indices.contains(index) else { return }
                         proxy.scrollTo(center.items[index].id)
@@ -646,16 +774,49 @@ struct CommandCenterView: View {
                 }
             }
         }
-        .frame(width: 560)
+        .frame(width: 600)
+        // Two layers: a black-tinted blur card in front of a 4pt blurred
+        // frame ring.
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.ultraThinMaterial)
+            BlurBackdrop()
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.black.opacity(0.25))
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.black.opacity(0.8),
+                                    Color.black.opacity(0.6),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
                 )
                 .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
                 .shadow(color: .black.opacity(0.65), radius: 70, y: 30)
+        )
+        .padding(6)
+        .background(
+            // The frame: a hollow 6pt ring only — no fill behind the card,
+            // so the ring's blur can't grey the card down. Radii stay
+            // concentric (20 = 14 + 6).
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.ultraThinMaterial, lineWidth: 6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.15), lineWidth: 6)
+                )
+        )
+        .background(
+            // No scrim, so separation comes from a big diffused black slab
+            // blurred at the very back of the stack.
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Color.black.opacity(0.55))
+                .padding(-28)
+                .blur(radius: 55)
+                .offset(y: 22)
         )
         .onAppear {
             center.openWindow = openWindow
@@ -667,60 +828,57 @@ struct CommandCenterView: View {
         }
     }
 
+    private func sectionHeader(_ title: String, isFirst: Bool) -> some View {
+        Text(title)
+            .font(compactText(13.5, .regular))
+            .foregroundStyle(.white.opacity(0.38))
+            .padding(.leading, 16)
+            .padding(.top, isFirst ? 6 : 18)
+            .padding(.bottom, 6)
+    }
+
     private func row(_ item: PaletteItem, at index: Int) -> some View {
         let isHighlighted = index == center.highlightedIndex
 
-        return HStack(spacing: 12) {
-            HStack(spacing: 9) {
-                iconView(item.icon, isHighlighted: isHighlighted)
-                    .frame(width: 16)
-
-                Text(item.title)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.white.opacity(isHighlighted ? 0.95 : 0.6))
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-            }
-
-            if let context = item.context {
-                Text(context)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(isHighlighted ? 0.55 : 0.35))
-                    .lineLimit(1)
-                    .frame(width: 120, alignment: .leading)
-            }
+        return HStack(spacing: 14) {
+            iconView(item.icon, isHighlighted: isHighlighted)
+                .frame(width: 20, alignment: .center)
 
             HStack(spacing: 8) {
-                if isHighlighted {
-                    HStack(spacing: 4) {
-                        Text(item.verb)
-                            .font(.system(size: 11, weight: .medium))
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .foregroundStyle(.white.opacity(0.6))
-                }
+                Text(item.title)
+                    .font(compactDisplay(16))
+                    .foregroundStyle(.white.opacity(isHighlighted ? 0.98 : 0.85))
+                    .lineLimit(1)
 
-                if index < 9 {
-                    Text("⌘\(index + 1)")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(isHighlighted ? 0.55 : 0.3))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.white.opacity(0.07))
-                        )
+                if let kind = item.kindLabel {
+                    Text(kind)
+                        .font(compactDisplay(16))
+                        .foregroundStyle(.white.opacity(0.28))
+                        .lineLimit(1)
                 }
             }
-            .frame(width: 110, alignment: .trailing)
+
+            Spacer(minLength: 16)
+
+            if let context = item.context {
+                HStack(spacing: 6) {
+                    Text(context)
+                        .font(compactText(15))
+                        .foregroundStyle(.white.opacity(isHighlighted ? 0.5 : 0.38))
+                        .lineLimit(1)
+                    if let symbol = item.contextSymbol {
+                        Image(systemName: symbol)
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(.white.opacity(isHighlighted ? 0.45 : 0.34))
+                    }
+                }
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
         .background(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(isHighlighted ? Color.white.opacity(0.09) : Color.clear)
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(isHighlighted ? Color.white.opacity(0.1) : Color.clear)
         )
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -738,26 +896,26 @@ struct CommandCenterView: View {
         switch icon {
         case .accent(let color):
             Circle()
-                .fill(color.opacity(isHighlighted ? 0.95 : 0.55))
-                .frame(width: 7, height: 7)
+                .fill(color.opacity(isHighlighted ? 1 : 0.9))
+                .frame(width: 9, height: 9)
         case .symbol(let name):
             Image(systemName: name)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(isHighlighted ? 0.8 : 0.45))
+                .font(.system(size: 16, weight: .regular))
+                .foregroundStyle(.white.opacity(isHighlighted ? 0.9 : 0.7))
         case .space(let spaceIcon):
             switch spaceIcon {
             case .dot:
                 Circle()
-                    .fill(.white.opacity(isHighlighted ? 0.85 : 0.4))
-                    .frame(width: 6, height: 6)
+                    .fill(.white.opacity(isHighlighted ? 0.9 : 0.55))
+                    .frame(width: 9, height: 9)
             case .symbol(let name):
                 Image(systemName: name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(isHighlighted ? 0.85 : 0.45))
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(.white.opacity(isHighlighted ? 0.9 : 0.7))
             case .emoji(let emoji):
                 Text(emoji)
-                    .font(.system(size: 12))
-                    .opacity(isHighlighted ? 1 : 0.55)
+                    .font(.system(size: 15))
+                    .opacity(isHighlighted ? 1 : 0.7)
             }
         }
     }
