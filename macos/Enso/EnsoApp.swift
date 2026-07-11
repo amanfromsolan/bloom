@@ -81,7 +81,6 @@ struct EnsoApp: App {
         WindowGroup {
             ContentView(store: sessionStore)
                 .frame(minWidth: 920, minHeight: 560)
-                .preferredColorScheme(.dark)
                 .onAppear {
                     TabAutoNamer.shared.configure(store: sessionStore)
                     ServiceProvider.shared.attach(store: sessionStore)
@@ -99,7 +98,6 @@ struct EnsoApp: App {
         // instead of Settings {} so the design keeps its own chrome.
         Window("Settings", id: SettingsPanel.windowID) {
             SettingsPanelView(panel: SettingsPanel.shared)
-                .preferredColorScheme(.dark)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)

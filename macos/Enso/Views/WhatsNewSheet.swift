@@ -35,10 +35,10 @@ struct WhatsNewSheet: View {
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
-                        .fill(Color.black.opacity(0.32))
+                        .fill(Theme.inverseInk.opacity(0.32))
                     Image(systemName: "sparkles")
                         .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(Theme.text(0.9))
                 }
                 .frame(width: 40, height: 40)
 
@@ -112,10 +112,10 @@ struct WhatsNewSheet: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(closeHovered ? 0.85 : 0.45))
+                    .foregroundStyle(Theme.text(closeHovered ? 0.85 : 0.45))
                     .frame(width: 30, height: 30)
                     .background(
-                        Circle().fill(Color.white.opacity(closeHovered ? 0.08 : 0))
+                        Circle().fill(Theme.ink.opacity(closeHovered ? 0.08 : 0))
                     )
                     .contentShape(Rectangle())
             }
@@ -126,7 +126,7 @@ struct WhatsNewSheet: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(red: 0.094, green: 0.096, blue: 0.105))
+                .fill(Theme.panel)
                 .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
                 .shadow(color: .black.opacity(0.65), radius: 70, y: 30)
         )
@@ -146,7 +146,7 @@ struct WhatsNewSheet: View {
     /// past its edge, macOS-sheet style.
     private func hairline(visible: Bool) -> some View {
         Rectangle()
-            .fill(Color.white.opacity(0.08))
+            .fill(Theme.ink.opacity(0.08))
             .frame(height: 1)
             .opacity(visible ? 1 : 0)
             .animation(.easeOut(duration: 0.15), value: visible)
@@ -165,7 +165,7 @@ struct WhatsNewSheet: View {
                     Text(section.title.uppercased())
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(1.1)
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(Theme.text(0.4))
                         .padding(.bottom, 1)
                 }
 
@@ -173,11 +173,11 @@ struct WhatsNewSheet: View {
                     HStack(alignment: .firstTextBaseline, spacing: 9) {
                         Text("·")
                             .font(.system(size: 12.5, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(Theme.text(0.35))
 
                         Text(item)
                             .font(.system(size: 12.5))
-                            .foregroundStyle(.white.opacity(0.78))
+                            .foregroundStyle(Theme.text(0.78))
                             .lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)

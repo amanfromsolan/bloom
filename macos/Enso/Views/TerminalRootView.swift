@@ -57,7 +57,7 @@ struct TerminalRootView: View {
                 .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
+                        .strokeBorder(Theme.ink.opacity(0.09), lineWidth: 1)
                 )
                 .shadow(color: .black.opacity(0.22), radius: 12, y: 3)
                 .overlay {
@@ -113,7 +113,7 @@ struct TerminalRootView: View {
         .background(WindowCornerRadiusReader { cardCornerRadius = $0 })
         .background(
             SidebarMaterial()
-                .overlay(Color.black.opacity(0.38))
+                .overlay(Theme.windowWash)
                 .ignoresSafeArea()
         )
         .ignoresSafeArea()
@@ -294,11 +294,11 @@ struct TerminalRootView: View {
             // Same tint the pinned sidebar sits on, so pinning from a peek
             // doesn't shift the panel's brightness.
             SidebarMaterial()
-                .overlay(Color.black.opacity(0.38))
+                .overlay(Theme.windowWash)
         )
         .overlay(alignment: .trailing) {
             Rectangle()
-                .fill(Color.white.opacity(0.08))
+                .fill(Theme.ink.opacity(0.08))
                 .frame(width: 1)
         }
         .shadow(color: .black.opacity(0.45), radius: 30, x: 10)
@@ -699,7 +699,7 @@ private struct SidebarResizeHandle: View {
             // capsule matches its height. Purely visual; hit-testing stays
             // with the grab strip so the top band keeps dragging the window.
             Capsule()
-                .fill(Color.white.opacity(isActive ? 0.22 : 0))
+                .fill(Theme.ink.opacity(isActive ? 0.22 : 0))
                 .frame(width: 3)
                 .padding(.vertical, 10)
                 .allowsHitTesting(false)

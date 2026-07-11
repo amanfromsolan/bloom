@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -132,20 +133,24 @@ enum SessionAccent: String, CaseIterable, Hashable, Codable {
     case pink
     case violet
 
-    /// Jewel tones tuned for the dark frosted sidebar: matched saturation
-    /// and lightness so no dot shouts louder than the others.
+    /// Jewel tones tuned for the dark frosted sidebar, plus deeper variants for
+    /// the light sidebar. The pale dark-mode tones have almost no contrast on a
+    /// light background, so light mode resolves to saturated, darker versions.
     var color: Color {
+        let pair = hexPair
+        return Color(nsColor: Theme.dynamic(
+            dark: NSColor(hex: pair.dark),
+            light: NSColor(hex: pair.light)
+        ))
+    }
+
+    private var hexPair: (dark: UInt32, light: UInt32) {
         switch self {
-        case .blue:
-            Color(hex: 0x6FA8FF)
-        case .green:
-            Color(hex: 0x5BD9A9)
-        case .orange:
-            Color(hex: 0xFFB454)
-        case .pink:
-            Color(hex: 0xFF7EB6)
-        case .violet:
-            Color(hex: 0xB18CFF)
+        case .blue: (0x6FA8FF, 0x2F6FE0)
+        case .green: (0x5BD9A9, 0x12A176)
+        case .orange: (0xFFB454, 0xD97D0F)
+        case .pink: (0xFF7EB6, 0xDE3F86)
+        case .violet: (0xB18CFF, 0x7B4DE0)
         }
     }
 

@@ -56,7 +56,7 @@ struct SettingsPanelView: View {
             navRail
 
             Rectangle()
-                .fill(Color.white.opacity(0.06))
+                .fill(Theme.ink.opacity(0.06))
                 .frame(width: 1)
                 .ignoresSafeArea(edges: .top)
 
@@ -65,7 +65,7 @@ struct SettingsPanelView: View {
         .frame(width: 780, height: 520)
         // Content stays in the safe area (below the hidden title bar) so the
         // window sizes correctly; only the backgrounds extend into that strip.
-        .background(Color(red: 0.094, green: 0.096, blue: 0.105).ignoresSafeArea())
+        .background(Theme.panel.ignoresSafeArea())
         .background(
             // Settings windows traditionally close on ⎋ as well as ⌘W.
             Button("") { dismissWindow(id: SettingsPanel.windowID) }
@@ -81,7 +81,7 @@ struct SettingsPanelView: View {
             // Traffic lights live in the title-bar strip above this content.
             Text("Settings")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(Theme.text(0.4))
                 .padding(.horizontal, 10)
                 .padding(.top, 6)
                 .padding(.bottom, 8)
@@ -99,12 +99,12 @@ struct SettingsPanelView: View {
 
             Text(appVersionLine)
                 .font(.system(size: 10.5))
-                .foregroundStyle(.white.opacity(0.28))
+                .foregroundStyle(Theme.text(0.28))
                 .padding(.horizontal, 10)
         }
         .padding(12)
         .frame(width: 196)
-        .background(Color.black.opacity(0.22).ignoresSafeArea(edges: .top))
+        .background(Theme.inverseInk.opacity(0.22).ignoresSafeArea(edges: .top))
     }
 
     private var appVersionLine: String {
@@ -148,18 +148,18 @@ private struct SettingsNavRow: View {
             HStack(spacing: 9) {
                 Image(systemName: section.symbol)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(.white.opacity(isSelected ? 0.9 : 0.55))
+                    .foregroundStyle(Theme.text(isSelected ? 0.9 : 0.55))
                     .frame(width: 18)
                 Text(section.title)
                     .font(.system(size: 13, weight: isSelected ? .medium : .regular))
-                    .foregroundStyle(.white.opacity(isSelected ? 0.95 : 0.7))
+                    .foregroundStyle(Theme.text(isSelected ? 0.95 : 0.7))
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.white.opacity(isSelected ? 0.1 : (hovering ? 0.05 : 0)))
+                    .fill(Theme.ink.opacity(isSelected ? 0.1 : (hovering ? 0.05 : 0)))
             )
             .contentShape(Rectangle())
         }
@@ -331,7 +331,7 @@ private struct TabsSettings: View {
                         .padding(.horizontal, 10)
                         .background(
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.white.opacity(0.06))
+                                .fill(Theme.ink.opacity(0.06))
                         )
                 }
             }
@@ -388,7 +388,7 @@ private struct KeyboardSettings: View {
 
         Text("Custom key bindings are coming later.")
             .font(.system(size: 11.5))
-            .foregroundStyle(.white.opacity(0.35))
+            .foregroundStyle(Theme.text(0.35))
     }
 }
 
@@ -440,7 +440,7 @@ private struct SettingsGroup<Content: View>: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.system(size: 13.5, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
+                .foregroundStyle(Theme.text(0.92))
                 .padding(.bottom, 8)
 
             content
@@ -464,11 +464,11 @@ private struct SettingsRow<Control: View>: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(Theme.text(0.85))
                 if let caption {
                     Text(caption)
                         .font(.system(size: 11.5))
-                        .foregroundStyle(.white.opacity(0.42))
+                        .foregroundStyle(Theme.text(0.42))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -494,7 +494,7 @@ private struct ShortcutRow: View {
         HStack {
             Text(title)
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Theme.text(0.85))
 
             Spacer()
 
@@ -502,15 +502,15 @@ private struct ShortcutRow: View {
                 ForEach(keys, id: \.self) { key in
                     Text(key)
                         .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(Theme.text(0.7))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(
                             RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-                                .fill(Color.white.opacity(0.07))
+                                .fill(Theme.ink.opacity(0.07))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-                                        .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
+                                        .strokeBorder(Theme.ink.opacity(0.09), lineWidth: 1)
                                 )
                         )
                 }
@@ -525,7 +525,7 @@ private struct PreviewFootnote: View {
     var body: some View {
         Text("Preview — these preferences are saved but not wired up yet.")
             .font(.system(size: 11.5))
-            .foregroundStyle(.white.opacity(0.35))
+            .foregroundStyle(Theme.text(0.35))
     }
 }
 

@@ -111,11 +111,11 @@ struct SidebarToggleButton: View {
         Button(action: action) {
             Image(systemName: "sidebar.left")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(isHovered ? 0.8 : 0.4))
+                .foregroundStyle(Theme.text(isHovered ? 0.8 : 0.4))
                 .frame(width: 26, height: 22)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(Color.white.opacity(isHovered ? 0.09 : 0))
+                        .fill(Theme.ink.opacity(isHovered ? 0.09 : 0))
                 )
                 .contentShape(Rectangle())
         }

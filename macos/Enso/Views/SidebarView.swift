@@ -255,7 +255,7 @@ private struct NewSpaceTeaser: View {
                     .rotationEffect(.degrees(-90))
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.35 + 0.65 * progress))
+                    .foregroundStyle(Color.white.opacity(0.35 + 0.65 * progress))
         }
         .frame(width: 30, height: 30)
         .scaleEffect(0.72 + 0.42 * progress)
@@ -270,6 +270,7 @@ private struct NewSpaceTeaser: View {
 private struct SpacePage: View {
     @ObservedObject var store: TerminalSessionStore
     @ObservedObject private var namer = TabAutoNamer.shared
+    @Environment(\.colorScheme) private var colorScheme
     let space: SidebarSpace
     let onEditSpace: (SidebarSpace) -> Void
 
@@ -402,8 +403,8 @@ private struct SpacePage: View {
             if isRenamingSpace {
                 TextField("", text: $draftSpaceName)
                     .textFieldStyle(.plain)
-                    .font(PaletteFont.text(14, .medium))
-                    .foregroundStyle(.white)
+                    .font(PaletteFont.text(14, Font.Weight.medium.bumped(for: colorScheme)))
+                    .foregroundStyle(Theme.text(1))
                     .focused($spaceNameFocused)
                     .onSubmit {
                         commitSpaceRename()
@@ -415,8 +416,8 @@ private struct SpacePage: View {
                     }
             } else {
                 Text(space.name)
-                    .font(PaletteFont.text(14, .medium))
-                    .foregroundStyle(.white.opacity(0.78))
+                    .font(PaletteFont.text(14, Font.Weight.medium.bumped(for: colorScheme)))
+                    .foregroundStyle(Theme.text(0.78))
                     .lineLimit(1)
                     // Rename only on the name text, not the whole header.
                     .onTapGesture(count: 2) {
@@ -455,7 +456,7 @@ private struct SpacePage: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(headerMenuHovered ? 0.9 : 0.55))
+                        .foregroundStyle(Theme.text(headerMenuHovered ? 0.9 : 0.55))
                         .frame(width: 18, height: 18)
                         .contentShape(Rectangle())
                 }
@@ -469,7 +470,7 @@ private struct SpacePage: View {
                 .frame(width: 18, height: 18)
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.white.opacity(headerMenuHovered ? 0.12 : 0))
+                        .fill(Theme.ink.opacity(headerMenuHovered ? 0.12 : 0))
                 )
                 .onHover { headerMenuHovered = $0 }
             }
@@ -480,7 +481,7 @@ private struct SpacePage: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 7)
-                .fill(headerHovered ? Color.white.opacity(0.05) : Color.clear)
+                .fill(headerHovered ? Theme.ink.opacity(0.05) : Color.clear)
         )
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -534,8 +535,8 @@ private struct SpacePage: View {
 
             if space.pinnedSessions.isEmpty && space.pinnedFolders.isEmpty {
                 Text("Drag tabs here to keep them")
-                    .font(PaletteFont.text(12, .light))
-                    .foregroundStyle(.white.opacity(0.28))
+                    .font(PaletteFont.text(12, Font.Weight.light.bumped(for: colorScheme)))
+                    .foregroundStyle(Theme.text(0.28))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 8)
             }
@@ -579,7 +580,7 @@ private struct SpacePage: View {
 
     private var zoneDivider: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.1))
+            .fill(Theme.ink.opacity(0.1))
             .frame(height: 1)
             .padding(.horizontal, 4)
             .padding(.vertical, 8)
@@ -603,15 +604,15 @@ private struct SpacePage: View {
                         .font(.system(size: 11, weight: .semibold))
                         .frame(width: 14)
                     Text("New Terminal")
-                        .font(PaletteFont.text(14, .regular))
+                        .font(PaletteFont.text(14, Font.Weight.regular.bumped(for: colorScheme)))
                     Spacer(minLength: 0)
                 }
-                .foregroundStyle(.white.opacity(newTabHovered ? 0.7 : 0.45))
+                .foregroundStyle(Theme.text(newTabHovered ? 0.7 : 0.45))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 7)
-                        .fill(newTabHovered ? Color.white.opacity(0.05) : Color.clear)
+                        .fill(newTabHovered ? Theme.ink.opacity(0.05) : Color.clear)
                 )
                 .contentShape(Rectangle())
             }
@@ -643,15 +644,15 @@ private struct SpacePage: View {
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
                 FolderGlyph(isOpen: isExpanded)
-                    .fill(.white.opacity(0.6), style: FillStyle(eoFill: true))
+                    .fill(Theme.ink.opacity(0.6), style: FillStyle(eoFill: true))
                     .frame(width: 14, height: 14)
                     .frame(width: 16)
 
                 if isRenaming {
                     TextField("", text: $draftFolderTitle)
                         .textFieldStyle(.plain)
-                        .font(PaletteFont.text(14, .regular))
-                        .foregroundStyle(.white)
+                        .font(PaletteFont.text(14, Font.Weight.regular.bumped(for: colorScheme)))
+                        .foregroundStyle(Theme.text(1))
                         .focused($folderRenameFocused)
                         .onSubmit {
                             commitFolderRename(folder)
@@ -661,8 +662,8 @@ private struct SpacePage: View {
                         }
                 } else {
                     Text(folder.title)
-                        .font(PaletteFont.text(14, .regular))
-                        .foregroundStyle(.white.opacity(0.82))
+                        .font(PaletteFont.text(14, Font.Weight.regular.bumped(for: colorScheme)))
+                        .foregroundStyle(Theme.text(0.82))
                         .lineLimit(1)
                         // Rename only on the title text; elsewhere the row
                         // just toggles expansion.
@@ -688,7 +689,7 @@ private struct SpacePage: View {
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(Theme.text(0.4))
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     .opacity(isHovered ? 1 : 0)
             }
@@ -700,7 +701,7 @@ private struct SpacePage: View {
                     .fill(
                         isSessionDragOver
                             ? Color.accentColor.opacity(0.22)
-                            : (isHovered ? Color.white.opacity(0.06) : Color.clear)
+                            : (isHovered ? Theme.ink.opacity(0.06) : Color.clear)
                     )
             )
             .contentShape(Rectangle())
@@ -782,6 +783,11 @@ private struct SpacePage: View {
                 }
             }
             .padding(.leading, 14)
+            // Trailing/bottom breathing room so the selected row's drop shadow
+            // isn't clipped by this container's collapse clip (the clip is what
+            // lets rows vanish into the folder when it folds).
+            .padding(.trailing, 6)
+            .padding(.bottom, 5)
             .frame(height: isExpanded ? nil : 0, alignment: .top)
             .clipped()
             .allowsHitTesting(isExpanded)
@@ -895,8 +901,8 @@ private struct SpacePage: View {
                 if isRenaming {
                     TextField("", text: $draftTitle)
                         .textFieldStyle(.plain)
-                        .font(PaletteFont.text(14, .regular))
-                        .foregroundStyle(.white)
+                        .font(PaletteFont.text(14, Font.Weight.regular.bumped(for: colorScheme)))
+                        .foregroundStyle(Theme.text(1))
                         .focused($renameFieldFocused)
                         .onSubmit {
                             commitRename(session)
@@ -908,8 +914,8 @@ private struct SpacePage: View {
                         }
                 } else {
                     Text(session.title)
-                        .font(PaletteFont.text(14, .light))
-                        .foregroundStyle(.white.opacity(isSelected ? 0.95 : 0.62))
+                        .font(PaletteFont.text(14, Font.Weight.light.bumped(for: colorScheme)))
+                        .foregroundStyle(Theme.text(isSelected ? 0.95 : 0.62))
                         .lineLimit(1)
                         .nameShimmer(namer.namingSessions.contains(session.id))
                         // Rename only when the double-click lands on the
@@ -936,16 +942,11 @@ private struct SpacePage: View {
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(
-                        isSelected
-                            ? Color.white.opacity(0.14)
-                            : (isMultiSelected
-                                ? Color.white.opacity(0.07)
-                                : (hoveredSessionID == session.id
-                                    ? Color.white.opacity(0.05)
-                                    : Color.clear))
-                    )
+                selectedRowBackground(
+                    isSelected: isSelected,
+                    isMultiSelected: isMultiSelected,
+                    isHovered: hoveredSessionID == session.id
+                )
             )
             .contentShape(Rectangle())
             .onHover { hovering in
@@ -990,6 +991,34 @@ private struct SpacePage: View {
             if !focused, renamingSessionID == session.id {
                 commitRename(session)
             }
+        }
+    }
+
+    /// Selected tab background. In dark mode it's the familiar bright wash; in
+    /// light mode the selected row lifts off the sidebar as a solid white card
+    /// with a soft shadow rather than reading as a flat grey fill.
+    @ViewBuilder
+    private func selectedRowBackground(
+        isSelected: Bool,
+        isMultiSelected: Bool,
+        isHovered: Bool
+    ) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 7)
+        if isSelected {
+            let light = colorScheme == .light
+            shape
+                .fill(light ? Color.white : Color.white.opacity(0.14))
+                .shadow(
+                    color: light ? Color.black.opacity(0.14) : .clear,
+                    radius: light ? 4 : 0,
+                    y: light ? 1 : 0
+                )
+        } else if isMultiSelected {
+            shape.fill(Theme.ink.opacity(0.07))
+        } else if isHovered {
+            shape.fill(Theme.ink.opacity(0.05))
+        } else {
+            shape.fill(Color.clear)
         }
     }
 
@@ -1159,11 +1188,11 @@ private struct HoverIconButton: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(isHovered ? 0.9 : 0.55))
+                .foregroundStyle(Theme.text(isHovered ? 0.9 : 0.55))
                 .frame(width: 18, height: 18)
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.white.opacity(isHovered ? 0.12 : 0))
+                        .fill(Theme.ink.opacity(isHovered ? 0.12 : 0))
                 )
                 .contentShape(Rectangle())
         }
@@ -1188,11 +1217,11 @@ private struct FolderFoldToggle: View {
         Button(action: collapsed ? onExpand : onCollapse) {
             Image(collapsed ? "ExpandFolders" : "CollapseFolders")
                 .renderingMode(.template)
-                .foregroundStyle(.white.opacity(isHovered ? 0.9 : 0.55))
+                .foregroundStyle(Theme.text(isHovered ? 0.9 : 0.55))
                 .frame(width: 18, height: 18)
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.white.opacity(isHovered ? 0.12 : 0))
+                        .fill(Theme.ink.opacity(isHovered ? 0.12 : 0))
                 )
                 .contentShape(Rectangle())
         }
@@ -1234,7 +1263,7 @@ private struct AutoNamingIndicator: View {
         Circle()
             .trim(from: 0.18, to: 1)
             .stroke(
-                .white.opacity(0.6),
+                Theme.ink.opacity(0.6),
                 style: StrokeStyle(lineWidth: 1.2, lineCap: .round)
             )
             .rotationEffect(.degrees(spinning ? 360 : 0))
@@ -1360,11 +1389,11 @@ private struct SessionCloseButton: View {
         Button(action: action) {
             Image(systemName: "xmark")
                 .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(.white.opacity(isHovered ? 0.9 : 0.5))
+                .foregroundStyle(Theme.text(isHovered ? 0.9 : 0.5))
                 .frame(width: 16, height: 16)
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.white.opacity(isHovered ? 0.14 : 0))
+                        .fill(Theme.ink.opacity(isHovered ? 0.14 : 0))
                 )
                 .contentShape(Rectangle())
         }
@@ -1471,7 +1500,7 @@ private struct SpaceIndicatorBar: View {
                     SpaceIndicatorIcon(icon: space.icon, isActive: isActive, size: 18)
                         .frame(width: 24, height: 24)
                         .background(
-                            Circle().fill(Color.white.opacity(isHovered ? 0.1 : 0))
+                            Circle().fill(Theme.ink.opacity(isHovered ? 0.1 : 0))
                         )
                         .contentShape(Circle())
                 }
@@ -1498,10 +1527,10 @@ private struct SpaceIndicatorBar: View {
             Button(action: onCreate) {
                 Image(systemName: "plus")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white.opacity(plusHovered ? 0.7 : 0.3))
+                    .foregroundStyle(Theme.text(plusHovered ? 0.7 : 0.3))
                     .frame(width: 24, height: 24)
                     .background(
-                        Circle().fill(Color.white.opacity(plusHovered ? 0.1 : 0))
+                        Circle().fill(Theme.ink.opacity(plusHovered ? 0.1 : 0))
                     )
                     .contentShape(Circle())
             }
@@ -1525,12 +1554,12 @@ private struct SpaceIndicatorIcon: View {
         switch icon {
         case .dot:
             Circle()
-                .fill(.white.opacity(isActive ? 0.85 : 0.25))
+                .fill(Theme.ink.opacity(isActive ? 0.85 : 0.25))
                 .frame(width: size * 0.36, height: size * 0.36)
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: size * 0.61, weight: .medium))
-                .foregroundStyle(.white.opacity(isActive ? 0.9 : 0.3))
+                .foregroundStyle(Theme.text(isActive ? 0.9 : 0.3))
         case .emoji(let emoji):
             Text(emoji)
                 .font(.system(size: size * 0.67))
@@ -1601,7 +1630,7 @@ struct SpaceEditorSheet: View {
                 .padding(.horizontal, 12)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.white.opacity(nameFocused ? 0.12 : 0.06))
+                        .fill(Theme.ink.opacity(nameFocused ? 0.12 : 0.06))
                 )
                 .onSubmit(saveAndDismiss)
                 .padding(.horizontal, 24)
@@ -1638,10 +1667,10 @@ struct SpaceEditorSheet: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(closeHovered ? 0.85 : 0.45))
+                    .foregroundStyle(Theme.text(closeHovered ? 0.85 : 0.45))
                     .frame(width: 30, height: 30)
                     .background(
-                        Circle().fill(Color.white.opacity(closeHovered ? 0.08 : 0))
+                        Circle().fill(Theme.ink.opacity(closeHovered ? 0.08 : 0))
                     )
                     .contentShape(Rectangle())
             }
@@ -1653,7 +1682,7 @@ struct SpaceEditorSheet: View {
         // macOS sheet, so no system border or forced corner radius.
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(red: 0.094, green: 0.096, blue: 0.105))
+                .fill(Theme.panel)
                 .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
                 .shadow(color: .black.opacity(0.65), radius: 70, y: 30)
         )
@@ -1691,8 +1720,10 @@ struct SpaceEditorSheet: View {
         } label: {
             ZStack {
                 // Recessed well so the preview reads as a distinct disc.
+                // inverseInk keeps it darker-than-panel in dark mode and a
+                // soft raised well in light mode, so the ink icon reads in both.
                 Circle()
-                    .fill(Color.black.opacity(0.32))
+                    .fill(Theme.inverseInk.opacity(0.32))
 
                 // Keyed on what's showing, so every swap — a shuffle or the
                 // hover plus — plays the shrink-out / spring-in transition
@@ -1705,7 +1736,7 @@ struct SpaceEditorSheet: View {
                         // Sized like the space icon it stands in for.
                         Image(systemName: "plus")
                             .font(.system(size: 28, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .foregroundStyle(Theme.text(0.9))
                     }
                 }
                 .id(discContent)
@@ -1717,7 +1748,7 @@ struct SpaceEditorSheet: View {
             .overlay(
                 Circle()
                     .stroke(
-                        Color.white.opacity(0.2),
+                        Theme.ink.opacity(0.2),
                         style: StrokeStyle(lineWidth: iconHovered ? 2 : 0)
                     )
                     .animation(.easeInOut(duration: 0.14), value: iconHovered)
@@ -1748,9 +1779,9 @@ struct SpaceEditorSheet: View {
         } label: {
             Image(systemName: "shuffle")
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.black.opacity(0.8))
+                .foregroundStyle(Theme.inverseInk.opacity(0.8))
                 .frame(width: 32, height: 32)
-                .background(Circle().fill(Color.white.opacity(0.94)))
+                .background(Circle().fill(Theme.ink.opacity(0.94)))
                 // A low-damping spring back to 1 overshoots into a pop.
                 .scaleEffect(shufflePop ? 0.8 : 1)
                 .animation(.spring(response: 0.3, dampingFraction: 0.42), value: shufflePop)
@@ -1818,12 +1849,12 @@ struct SpaceEditorSheet: View {
             .frame(width: 340, height: 380)
             .background(popoverBackground)
             .presentationBackground(popoverBackground)
-            .colorScheme(.dark)
     }
 
-    /// Matches the sheet's own near-black fill.
+    /// Matches the sheet's own panel fill; adaptive so the floated picker
+    /// follows the system appearance like the rest of the editor.
     private var popoverBackground: Color {
-        Color(red: 0.094, green: 0.096, blue: 0.105)
+        Theme.panel
     }
 
     private var tabBar: some View {
@@ -1841,12 +1872,12 @@ struct SpaceEditorSheet: View {
         } label: {
             Text(title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(selected ? 0.92 : 0.5))
+                .foregroundStyle(Theme.text(selected ? 0.92 : 0.5))
                 .padding(.vertical, 5)
                 .padding(.horizontal, 12)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.white.opacity(selected ? 0.1 : 0))
+                        .fill(Theme.ink.opacity(selected ? 0.1 : 0))
                 )
                 .contentShape(Rectangle())
         }
@@ -1857,7 +1888,7 @@ struct SpaceEditorSheet: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(Theme.text(0.35))
             TextField(prompt, text: text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
@@ -1867,7 +1898,7 @@ struct SpaceEditorSheet: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .foregroundStyle(Theme.text(0.3))
                 }
                 .buttonStyle(.plain)
             }
@@ -1876,7 +1907,7 @@ struct SpaceEditorSheet: View {
         .padding(.horizontal, 9)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .fill(Theme.ink.opacity(0.06))
         )
     }
 
@@ -1936,12 +1967,12 @@ struct SpaceEditorSheet: View {
         HStack {
             Text(title.uppercased())
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(Theme.text(0.4))
             Spacer(minLength: 0)
         }
         .padding(.vertical, 3)
         .padding(.horizontal, 2)
-        .background(Color(red: 0.094, green: 0.096, blue: 0.105).opacity(0.92))
+        .background(Theme.panel.opacity(0.92))
     }
 
     /// One selectable grid cell: a rounded well that fills with the accent
@@ -2026,12 +2057,12 @@ private struct PickerTileStyle: ButtonStyle {
                         .fill(
                             isSelected
                                 ? Color.accentColor.opacity(0.85)
-                                : Color.white.opacity(hovering ? 0.09 : 0.04)
+                                : Theme.ink.opacity(hovering ? 0.09 : 0.04)
                         )
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.white.opacity(isSelected ? 0.5 : 0), lineWidth: 1)
+                        .stroke(Theme.ink.opacity(isSelected ? 0.5 : 0), lineWidth: 1)
                 )
                 .contentShape(Rectangle())
                 // Pressing brings the hovered swell back down to rest, so the
@@ -2086,12 +2117,12 @@ struct ModalPrimaryButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.black.opacity(0.88))
+                .foregroundStyle(Theme.inverseInk.opacity(0.88))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.white.opacity(
+                        .fill(Theme.ink.opacity(
                             configuration.isPressed ? 0.78 : (hovering ? 1 : 0.9)
                         ))
                 )
@@ -2114,12 +2145,12 @@ struct ModalSecondaryButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(hovering ? 0.92 : 0.8))
+                .foregroundStyle(Theme.text(hovering ? 0.92 : 0.8))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.white.opacity(
+                        .fill(Theme.ink.opacity(
                             configuration.isPressed ? 0.16 : (hovering ? 0.13 : 0.09)
                         ))
                 )

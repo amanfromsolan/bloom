@@ -693,16 +693,17 @@ struct CommandCenterView: View {
     @ObservedObject var center: CommandCenter
     @FocusState private var searchFocused: Bool
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.colorScheme) private var colorScheme
 
     // Palette-only typography: SF Compact (installed via Apple's SF font
     // pack; bundle the faces before shipping). The variable "SF Compact"
     // for titles, Text for small labels. Symbols stay on .system.
     private func compactDisplay(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
-        PaletteFont.display(size, weight)
+        PaletteFont.display(size, weight.bumped(for: colorScheme))
     }
 
     private func compactText(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
-        PaletteFont.text(size, weight)
+        PaletteFont.text(size, weight.bumped(for: colorScheme))
     }
 
     var body: some View {
@@ -710,35 +711,35 @@ struct CommandCenterView: View {
             HStack(spacing: 14) {
                 Image(systemName: center.isRenaming ? "pencil" : "magnifyingglass")
                     .font(.system(size: 17, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(Theme.text(0.4))
 
                 TextField(center.inputPlaceholder, text: $center.query)
                     .textFieldStyle(.plain)
                     .font(compactDisplay(18))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(Theme.text(0.92))
                     .focused($searchFocused)
             }
             .padding(.horizontal, 22)
             .padding(.vertical, 20)
 
             Rectangle()
-                .fill(Color.white.opacity(0.06))
+                .fill(Theme.ink.opacity(0.06))
                 .frame(height: 1)
 
             if center.isRenaming {
                 HStack(spacing: 6) {
                     Text("↵ Rename")
                     Text("·")
-                        .foregroundStyle(.white.opacity(0.2))
+                        .foregroundStyle(Theme.text(0.2))
                     Text("esc Cancel")
                 }
                 .font(compactText(12, .regular))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(Theme.text(0.4))
                 .padding(.vertical, 14)
             } else if center.items.isEmpty {
                 Text("No matches")
                     .font(compactText(13))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(Theme.text(0.35))
                     .padding(.vertical, 24)
             } else {
                 ScrollViewReader { proxy in
@@ -783,7 +784,7 @@ struct CommandCenterView: View {
     private func sectionHeader(_ title: String, isFirst: Bool) -> some View {
         Text(title)
             .font(compactText(13.5, .regular))
-            .foregroundStyle(.white.opacity(0.38))
+            .foregroundStyle(Theme.text(0.38))
             .padding(.leading, 16)
             .padding(.top, isFirst ? 6 : 18)
             .padding(.bottom, 6)
@@ -799,13 +800,13 @@ struct CommandCenterView: View {
             HStack(spacing: 8) {
                 Text(item.title)
                     .font(compactDisplay(16))
-                    .foregroundStyle(.white.opacity(isHighlighted ? 0.98 : 0.85))
+                    .foregroundStyle(Theme.text(isHighlighted ? 0.98 : 0.85))
                     .lineLimit(1)
 
                 if let kind = item.kindLabel {
                     Text(kind)
                         .font(compactDisplay(16))
-                        .foregroundStyle(.white.opacity(0.28))
+                        .foregroundStyle(Theme.text(0.28))
                         .lineLimit(1)
                 }
             }
@@ -816,12 +817,12 @@ struct CommandCenterView: View {
                 HStack(spacing: 6) {
                     Text(context)
                         .font(compactText(15))
-                        .foregroundStyle(.white.opacity(isHighlighted ? 0.5 : 0.38))
+                        .foregroundStyle(Theme.text(isHighlighted ? 0.5 : 0.38))
                         .lineLimit(1)
                     if let symbol = item.contextSymbol {
                         Image(systemName: symbol)
                             .font(.system(size: 12, weight: .regular))
-                            .foregroundStyle(.white.opacity(isHighlighted ? 0.45 : 0.34))
+                            .foregroundStyle(Theme.text(isHighlighted ? 0.45 : 0.34))
                     }
                 }
             }
@@ -830,7 +831,7 @@ struct CommandCenterView: View {
         .padding(.vertical, 13)
         .background(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(isHighlighted ? Color.white.opacity(0.1) : Color.clear)
+                .fill(isHighlighted ? Theme.ink.opacity(0.1) : Color.clear)
         )
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -853,17 +854,17 @@ struct CommandCenterView: View {
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: 16, weight: .regular))
-                .foregroundStyle(.white.opacity(isHighlighted ? 0.9 : 0.7))
+                .foregroundStyle(Theme.text(isHighlighted ? 0.9 : 0.7))
         case .space(let spaceIcon):
             switch spaceIcon {
             case .dot:
                 Circle()
-                    .fill(.white.opacity(isHighlighted ? 0.9 : 0.55))
+                    .fill(Theme.ink.opacity(isHighlighted ? 0.9 : 0.55))
                     .frame(width: 9, height: 9)
             case .symbol(let name):
                 Image(systemName: name)
                     .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(.white.opacity(isHighlighted ? 0.9 : 0.7))
+                    .foregroundStyle(Theme.text(isHighlighted ? 0.9 : 0.7))
             case .emoji(let emoji):
                 Text(emoji)
                     .font(.system(size: 15))
@@ -887,15 +888,15 @@ enum PaletteFont {
     }
 }
 
-/// SwiftUI materials clamp to a grey floor even over pure black; the HUD
-/// material pinned to dark appearance is the darkest real blur macOS offers.
+/// SwiftUI materials clamp to a grey floor even over pure black; the raw HUD
+/// material is the strongest real blur macOS offers. It follows the system
+/// appearance, so the palette card frosts dark in dark mode, light in light.
 struct PaletteBlurBackdrop: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .hudWindow
         view.blendingMode = .withinWindow
         view.state = .active
-        view.appearance = NSAppearance(named: .darkAqua)
         return view
     }
 
@@ -917,8 +918,8 @@ struct PaletteCardChrome: ViewModifier {
                             .fill(
                                 LinearGradient(
                                     colors: [
-                                        Color.black.opacity(0.8),
-                                        Color.black.opacity(0.6),
+                                        Theme.paletteCardTop,
+                                        Theme.paletteCardBottom,
                                     ],
                                     startPoint: .top,
                                     endPoint: .bottom
@@ -937,7 +938,7 @@ struct PaletteCardChrome: ViewModifier {
                     .strokeBorder(.ultraThinMaterial, lineWidth: 5)
                     .overlay(
                         RoundedRectangle(cornerRadius: 19, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.15), lineWidth: 5)
+                            .strokeBorder(Theme.ink.opacity(0.15), lineWidth: 5)
                     )
             )
             .background(

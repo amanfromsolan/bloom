@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		A100000A2FD810C30001BF12 /* EnsoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000092FD810C30001BF12 /* EnsoApp.swift */; };
 		A100000C2FD810C30001BF12 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000B2FD810C30001BF12 /* ContentView.swift */; };
+		A1THEME012FD810C30001BF12 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1THEME022FD810C30001BF12 /* AppTheme.swift */; };
 		A100000E2FD810C30001BF12 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A100000D2FD810C30001BF12 /* Assets.xcassets */; };
 		A10000102FD810C30001BF12 /* TerminalCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000012FD810C30001BF12 /* TerminalCommands.swift */; };
 		A10000112FD810C30001BF12 /* TerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000022FD810C30001BF12 /* TerminalSession.swift */; };
@@ -72,6 +73,7 @@
 		A10000082FD810C30001BF12 /* TerminalWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceView.swift; sourceTree = "<group>"; };
 		A10000092FD810C30001BF12 /* EnsoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnsoApp.swift; sourceTree = "<group>"; };
 		A100000B2FD810C30001BF12 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A1THEME022FD810C30001BF12 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		A100000D2FD810C30001BF12 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A10000332FD810C30001BF12 /* GhosttyRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyRuntime.swift; sourceTree = "<group>"; };
 		A10000342FD810C30001BF12 /* GhosttySurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttySurfaceView.swift; sourceTree = "<group>"; };
@@ -165,6 +167,7 @@
 				A10000222FD810C30001BF12 /* Services */,
 				A10000232FD810C30001BF12 /* Stores */,
 				A10000242FD810C30001BF12 /* Views */,
+				A1THEME032FD810C30001BF12 /* Support */,
 				A100000D2FD810C30001BF12 /* Assets.xcassets */,
 				A1GRES0022FD810C30001BF12 /* terminfo */,
 				A1GRES0042FD810C30001BF12 /* ghostty */,
@@ -184,6 +187,14 @@
 				A1QUITG022FD810C30001BF12 /* QuitGuard.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		A1THEME032FD810C30001BF12 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				A1THEME022FD810C30001BF12 /* AppTheme.swift */,
+			);
+			path = Support;
 			sourceTree = "<group>";
 		};
 		A10000212FD810C30001BF12 /* Models */ = {
@@ -394,6 +405,7 @@
 			files = (
 				A100000A2FD810C30001BF12 /* EnsoApp.swift in Sources */,
 				A100000C2FD810C30001BF12 /* ContentView.swift in Sources */,
+				A1THEME012FD810C30001BF12 /* AppTheme.swift in Sources */,
 				A10000102FD810C30001BF12 /* TerminalCommands.swift in Sources */,
 				A1QUITG012FD810C30001BF12 /* QuitGuard.swift in Sources */,
 				A10000112FD810C30001BF12 /* TerminalSession.swift in Sources */,

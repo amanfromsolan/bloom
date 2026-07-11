@@ -54,7 +54,7 @@ private struct UpdateCardBody: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(Theme.text(0.85))
                     .lineLimit(1)
                     // No fixedSize: the sidebar is drag-resizable, so the
                     // heading truncates to fit a narrow width instead of
@@ -66,16 +66,16 @@ private struct UpdateCardBody: View {
                 if case .available(let version) = phase {
                     // current → new, the new version slightly brighter.
                     (
-                        Text(currentVersion).foregroundStyle(.white.opacity(0.45))
-                            + Text("  →  ").foregroundStyle(.white.opacity(0.25))
-                            + Text(version).foregroundStyle(.white.opacity(0.65))
+                        Text(currentVersion).foregroundStyle(Theme.text(0.45))
+                            + Text("  →  ").foregroundStyle(Theme.text(0.25))
+                            + Text(version).foregroundStyle(Theme.text(0.65))
                     )
                     .font(.system(size: 10, design: .monospaced))
                     .lineLimit(1)
                 } else if let subtitle {
                     Text(subtitle)
                         .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Theme.text(0.45))
                         .lineLimit(2)
                 }
 
@@ -103,10 +103,10 @@ private struct UpdateCardBody: View {
         .padding(.vertical, 9)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.white.opacity(0.05))
+                .fill(Theme.ink.opacity(0.05))
                 .overlay(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.07))
+                        .strokeBorder(Theme.ink.opacity(0.07))
                 )
         )
         // Close floats on the card's corner instead of costing the title
@@ -134,7 +134,7 @@ private struct UpdateCardBody: View {
         case .available, .downloading, .extracting:
             Image(systemName: "arrow.down.circle.fill")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(Theme.text(0.5))
         case .readyToRestart:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 14, weight: .medium))
@@ -142,7 +142,7 @@ private struct UpdateCardBody: View {
         case .upToDate:
             Image(systemName: "checkmark.circle")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(Theme.text(0.5))
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 13, weight: .medium))
@@ -210,9 +210,9 @@ private struct UpdateCardBody: View {
         Button(action: onDismiss) {
             Image(systemName: "xmark")
                 .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(.white.opacity(closeHovered ? 0.7 : 0.3))
+                .foregroundStyle(Theme.text(closeHovered ? 0.7 : 0.3))
                 .frame(width: 18, height: 18)
-                .background(Circle().fill(Color.white.opacity(closeHovered ? 0.1 : 0)))
+                .background(Circle().fill(Theme.ink.opacity(closeHovered ? 0.1 : 0)))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -233,12 +233,12 @@ private struct CardQuietButton: View {
         Button(action: action) {
             Text(label)
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.white.opacity(hovered ? 0.9 : 0.7))
+                .foregroundStyle(Theme.text(hovered ? 0.9 : 0.7))
                 .fixedSize()
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(
-                    Capsule().fill(Color.white.opacity(hovered ? 0.14 : 0.08))
+                    Capsule().fill(Theme.ink.opacity(hovered ? 0.14 : 0.08))
                 )
                 .contentShape(Capsule())
         }
@@ -257,7 +257,7 @@ private struct CardActionButton: View {
         Button(action: action) {
             Text(label)
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.95))
+                .foregroundStyle(Theme.text(0.95))
                 .fixedSize()
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)

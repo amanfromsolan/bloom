@@ -133,12 +133,13 @@ final class TabSwitcher: ObservableObject {
 struct TabSwitcherHUD: View {
     @ObservedObject var switcher: TabSwitcher
     @ObservedObject var store: TerminalSessionStore
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Switch Tabs")
-                .font(PaletteFont.text(13.5, .regular))
-                .foregroundStyle(.white.opacity(0.38))
+                .font(PaletteFont.text(13.5, Font.Weight.regular.bumped(for: colorScheme)))
+                .foregroundStyle(Theme.text(0.38))
                 .padding(.leading, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 6)
@@ -161,8 +162,8 @@ struct TabSwitcherHUD: View {
                 .frame(width: 20, alignment: .center)
 
             Text(session.title)
-                .font(PaletteFont.display(16))
-                .foregroundStyle(.white.opacity(isHighlighted ? 0.98 : 0.85))
+                .font(PaletteFont.display(16, Font.Weight.light.bumped(for: colorScheme)))
+                .foregroundStyle(Theme.text(isHighlighted ? 0.98 : 0.85))
                 .lineLimit(1)
 
             Spacer(minLength: 16)
@@ -171,11 +172,11 @@ struct TabSwitcherHUD: View {
                 HStack(spacing: 6) {
                     Text(folder)
                         .font(PaletteFont.text(15))
-                        .foregroundStyle(.white.opacity(isHighlighted ? 0.5 : 0.38))
+                        .foregroundStyle(Theme.text(isHighlighted ? 0.5 : 0.38))
                         .lineLimit(1)
                     Image(systemName: "folder")
                         .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(.white.opacity(isHighlighted ? 0.45 : 0.34))
+                        .foregroundStyle(Theme.text(isHighlighted ? 0.45 : 0.34))
                 }
             }
         }
@@ -183,7 +184,7 @@ struct TabSwitcherHUD: View {
         .padding(.vertical, 13)
         .background(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(isHighlighted ? Color.white.opacity(0.1) : Color.clear)
+                .fill(isHighlighted ? Theme.ink.opacity(0.1) : Color.clear)
         )
     }
 
