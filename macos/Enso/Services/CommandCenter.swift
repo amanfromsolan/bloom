@@ -260,11 +260,12 @@ final class CommandCenter: ObservableObject {
             let commands = commandItems(in: store)
             items = commandQuery.isEmpty ? commands : Self.filter(commands, query: commandQuery)
         } else if trimmed.isEmpty {
-            // Default sheet mirrors the mock: four recent tabs from the
-            // current space (the top one is preselected so Enter jumps back
-            // to where you were), then a short "Commands" menu, with other
-            // spaces below the fold.
-            items = Array(recentTabItems(in: store).prefix(4))
+            // Default sheet: "Suggestions" up top with the new-tab actions
+            // (Enter opens a fresh tab, as before the redesign), four recent
+            // tabs from the current space, then a short "Commands" menu,
+            // with other spaces below the fold.
+            items = newTabItems(in: store, section: .suggestions)
+                + Array(recentTabItems(in: store).prefix(4))
                 + menuCommandItems(in: store)
                 + extraSpaceItems(in: store)
         } else {
@@ -351,14 +352,18 @@ final class CommandCenter: ObservableObject {
         spaceItems(in: store).filter { $0.id != "space-\(store.activeSpaceID)" }
     }
 
-    private func newTabItems(in store: TerminalSessionStore) -> [PaletteItem] {
+    private func newTabItems(
+        in store: TerminalSessionStore,
+        section: PaletteItem.Section = .commands
+    ) -> [PaletteItem] {
         var items: [PaletteItem] = []
         items.append(PaletteItem(
             id: "cmd-new-tab",
             icon: .symbol("plus.square"),
             title: "New Tab",
             context: nil,
-            verb: "Open"
+            verb: "Open",
+            section: section
         ) { [weak store] in
             store?.createSession(workingDirectory: NSHomeDirectory())
         })
@@ -372,7 +377,8 @@ final class CommandCenter: ObservableObject {
                 title: "New Tab in Current Folder",
                 context: folder.title,
                 contextSymbol: "folder",
-                verb: "Open"
+                verb: "Open",
+                section: section
             ) { [weak store] in
                 store?.createSession(inFolder: folder.id)
             })
@@ -384,7 +390,8 @@ final class CommandCenter: ObservableObject {
                 icon: .symbol("folder.badge.plus"),
                 title: "New Tab in Current Folder",
                 context: Self.folderName(for: cwd),
-                verb: "Open"
+                verb: "Open",
+                section: section
             ) { [weak store] in
                 store?.createSession(besideSelectionWithWorkingDirectory: cwd)
             })
@@ -396,7 +403,9 @@ final class CommandCenter: ObservableObject {
     /// sheet — the handful the mock surfaces, not the full command list
     /// (that appears once you start typing).
     private func menuCommandItems(in store: TerminalSessionStore) -> [PaletteItem] {
-        var items = newTabItems(in: store)
+        // New-tab items live in the "Suggestions" section up top on the
+        // default sheet, so the menu carries only the rest.
+        var items: [PaletteItem] = []
         if store.selection != nil {
             items.append(PaletteItem(
                 id: "cmd-auto-rename-tab",
@@ -654,6 +663,7 @@ struct PaletteItem: Identifiable {
 
     /// Drives the grouped section headers in the palette.
     enum Section: String {
+        case suggestions = "Suggestions"
         case recentTabs = "Recent Tabs"
         case spaces = "Spaces"
         case commands = "Commands"
@@ -688,27 +698,11 @@ struct CommandCenterView: View {
     // pack; bundle the faces before shipping). The variable "SF Compact"
     // for titles, Text for small labels. Symbols stay on .system.
     private func compactDisplay(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
-        .custom("SF Compact", size: size).weight(weight)
+        PaletteFont.display(size, weight)
     }
 
     private func compactText(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
-        .custom("SF Compact Text", size: size).weight(weight)
-    }
-
-    // SwiftUI materials clamp to a grey floor even over pure black; the
-    // HUD material pinned to dark appearance is the darkest real blur
-    // macOS offers.
-    private struct BlurBackdrop: NSViewRepresentable {
-        func makeNSView(context: Context) -> NSVisualEffectView {
-            let view = NSVisualEffectView()
-            view.material = .hudWindow
-            view.blendingMode = .withinWindow
-            view.state = .active
-            view.appearance = NSAppearance(named: .darkAqua)
-            return view
-        }
-
-        func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+        PaletteFont.text(size, weight)
     }
 
     var body: some View {
@@ -775,49 +769,7 @@ struct CommandCenterView: View {
             }
         }
         .frame(width: 600)
-        // Two layers: a black-tinted blur card in front of a 4pt blurred
-        // frame ring.
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .background(
-            BlurBackdrop()
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.black.opacity(0.8),
-                                    Color.black.opacity(0.6),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                )
-                .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
-                .shadow(color: .black.opacity(0.65), radius: 70, y: 30)
-        )
-        .padding(6)
-        .background(
-            // The frame: a hollow 6pt ring only — no fill behind the card,
-            // so the ring's blur can't grey the card down. Radii stay
-            // concentric (20 = 14 + 6).
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(.ultraThinMaterial, lineWidth: 6)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.15), lineWidth: 6)
-                )
-        )
-        .background(
-            // No scrim, so separation comes from a big diffused black slab
-            // blurred at the very back of the stack.
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(Color.black.opacity(0.55))
-                .padding(-28)
-                .blur(radius: 55)
-                .offset(y: 22)
-        )
+        .paletteCardChrome()
         .onAppear {
             center.openWindow = openWindow
             // A beat later so focus wins over the terminal NSView, which is
@@ -918,5 +870,88 @@ struct CommandCenterView: View {
                     .opacity(isHighlighted ? 1 : 0.7)
             }
         }
+    }
+}
+
+// MARK: - Shared palette chrome
+
+/// SF Compact faces for palette-style overlays. These resolve against the
+/// user-installed Apple SF pack today; bundle the faces before shipping.
+enum PaletteFont {
+    static func display(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
+        .custom("SF Compact", size: size).weight(weight)
+    }
+
+    static func text(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
+        .custom("SF Compact Text", size: size).weight(weight)
+    }
+}
+
+/// SwiftUI materials clamp to a grey floor even over pure black; the HUD
+/// material pinned to dark appearance is the darkest real blur macOS offers.
+struct PaletteBlurBackdrop: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .withinWindow
+        view.state = .active
+        view.appearance = NSAppearance(named: .darkAqua)
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}
+
+/// The floating-card look shared by the ⌘T palette and the Ctrl-Tab HUD: a
+/// black-gradient blur card in front of a hollow blurred ring, separated
+/// from the terminal by a diffused slab at the very back instead of a scrim.
+struct PaletteCardChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(
+                PaletteBlurBackdrop()
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.black.opacity(0.8),
+                                        Color.black.opacity(0.6),
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                    )
+                    .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
+                    .shadow(color: .black.opacity(0.65), radius: 70, y: 30)
+            )
+            .padding(5)
+            .background(
+                // A hollow 5pt ring only — no fill behind the card, so the
+                // ring's blur can't grey the card down. Radii stay
+                // concentric (19 = 14 + 5).
+                RoundedRectangle(cornerRadius: 19, style: .continuous)
+                    .strokeBorder(.ultraThinMaterial, lineWidth: 5)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 19, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.15), lineWidth: 5)
+                    )
+            )
+            .background(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(Color.black.opacity(0.55))
+                    .padding(-28)
+                    .blur(radius: 55)
+                    .offset(y: 22)
+            )
+    }
+}
+
+extension View {
+    func paletteCardChrome() -> some View {
+        modifier(PaletteCardChrome())
     }
 }

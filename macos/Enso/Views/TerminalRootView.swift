@@ -71,10 +71,8 @@ struct TerminalRootView: View {
 
                             TabSwitcherHUD(switcher: switcher, store: store)
                         }
-                        .transition(.opacity)
                     }
                 }
-                .animation(.easeOut(duration: 0.12), value: switcher.isShowingHUD)
                 // No leading inset beside the sidebar: the card starts flush
                 // at the sidebar's trailing edge, so the resize handle sits
                 // exactly where the terminal begins instead of a gutter short

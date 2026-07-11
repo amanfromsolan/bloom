@@ -85,7 +85,8 @@ final class TabSwitcher: ObservableObject {
         let ordered = store.recencyOrderedSessions(inSpace: store.activeSpaceID)
         guard ordered.count > 1 else { return }
 
-        sessions = ordered
+        // The HUD (and the cycle) caps at the nine most recent tabs.
+        sessions = Array(ordered.prefix(9))
         originalSelection = store.selection
         highlightedIndex = ordered.firstIndex { $0.id == store.selection } ?? 0
         isActive = true
@@ -134,70 +135,55 @@ struct TabSwitcherHUD: View {
     @ObservedObject var store: TerminalSessionStore
 
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Switch Tabs")
+                .font(PaletteFont.text(13.5))
+                .foregroundStyle(.white.opacity(0.38))
+                .padding(.leading, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 6)
+
             ForEach(Array(switcher.sessions.enumerated()), id: \.element.id) { index, session in
                 row(session, isHighlighted: index == switcher.highlightedIndex)
             }
         }
-        .padding(8)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
         .frame(width: 560)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.black.opacity(0.22))
-                )
-                // Tight hard shadow for definition + wide diffused one for depth.
-                .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
-                .shadow(color: .black.opacity(0.65), radius: 70, y: 30)
-        )
+        .paletteCardChrome()
     }
 
     private func row(_ session: TerminalSession, isHighlighted: Bool) -> some View {
-        HStack(spacing: 12) {
-            // Column 1: accent dot + tab title, takes the remaining width.
-            HStack(spacing: 9) {
-                Circle()
-                    .fill(session.accent.color.opacity(isHighlighted ? 0.95 : 0.55))
-                    .frame(width: 7, height: 7)
+        HStack(spacing: 14) {
+            Circle()
+                .fill(session.accent.color.opacity(isHighlighted ? 1 : 0.9))
+                .frame(width: 9, height: 9)
+                .frame(width: 20, alignment: .center)
 
-                Text(session.title)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.white.opacity(isHighlighted ? 0.95 : 0.6))
-                    .lineLimit(1)
+            Text(session.title)
+                .font(PaletteFont.display(16))
+                .foregroundStyle(.white.opacity(isHighlighted ? 0.98 : 0.85))
+                .lineLimit(1)
 
-                Spacer(minLength: 0)
-            }
+            Spacer(minLength: 16)
 
-            // Column 2: containing folder, when any.
-            HStack(spacing: 5) {
-                if let folder = folderTitle(for: session) {
-                    FolderBadgeGlyph()
+            if let folder = folderTitle(for: session) {
+                HStack(spacing: 6) {
                     Text(folder)
-                        .font(.system(size: 12))
+                        .font(PaletteFont.text(15))
+                        .foregroundStyle(.white.opacity(isHighlighted ? 0.5 : 0.38))
                         .lineLimit(1)
+                    Image(systemName: "folder")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(.white.opacity(isHighlighted ? 0.45 : 0.34))
                 }
             }
-            .foregroundStyle(.white.opacity(isHighlighted ? 0.55 : 0.35))
-            .frame(width: 130, alignment: .leading)
-
-            // Column 3: switch affordance, only on the highlighted row.
-            HStack(spacing: 4) {
-                Text("Switch")
-                    .font(.system(size: 11, weight: .medium))
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-            }
-            .foregroundStyle(.white.opacity(0.6))
-            .frame(width: 64, alignment: .trailing)
-            .opacity(isHighlighted ? 1 : 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
         .background(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(isHighlighted ? Color.white.opacity(0.09) : Color.clear)
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(isHighlighted ? Color.white.opacity(0.1) : Color.clear)
         )
     }
 
@@ -205,13 +191,5 @@ struct TabSwitcherHUD: View {
         store.activeSpace.pinnedFolders
             .first { $0.sessions.contains { $0.id == session.id } }?
             .title
-    }
-}
-
-/// Tiny folder marker for HUD rows (SF Symbol is fine at this size).
-private struct FolderBadgeGlyph: View {
-    var body: some View {
-        Image(systemName: "folder.fill")
-            .font(.system(size: 9, weight: .medium))
     }
 }
