@@ -32,6 +32,15 @@ enum Theme {
         light: NSColor(red: 0.965, green: 0.965, blue: 0.972, alpha: 1)
     ))
 
+    /// Recessed well behind the space editor's icon preview. Dark mode keeps
+    /// the original black well (`inverseInk × 0.32`) sunk into the near-black
+    /// panel. Light mode uses a soft grey instead — a white well would vanish
+    /// on the light panel, so this reads as a visible disc in both.
+    static let iconWell = Color(nsColor: dynamic(
+        dark: NSColor(white: 0, alpha: 0.32),
+        light: NSColor(white: 0, alpha: 0.12)
+    ))
+
     /// Wash laid over the frosted window/sidebar material. In dark mode it
     /// deepens the too-light blur toward near-black; in light mode it brightens
     /// the blur toward white so the sidebar reads as light chrome. Replaces the
@@ -157,4 +166,39 @@ enum AppAppearance: String, CaseIterable {
         case .dark: NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
         }
     }
+}
+
+// MARK: - Owned-modal frost chrome
+
+/// Backdrop for owned frosted modals (What's New, the space editor): the
+/// sidebar's material under the window wash, 24pt corners, a dark-mode
+/// hairline, and the standard modal shadow pair. Pair it with a matching
+/// 24pt clipShape on the modal's content.
+struct ModalFrostBackdrop: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        FrostMaterial()
+            .overlay(Theme.windowWash)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.05 : 0))
+            )
+            .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
+            .shadow(color: .black.opacity(0.65), radius: 70, y: 30)
+    }
+}
+
+/// The sidebar's frosted material blended within the window.
+private struct FrostMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .withinWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }

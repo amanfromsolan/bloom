@@ -224,9 +224,11 @@ struct TerminalRootView: View {
                 }
             }
         }
-        // What's New: same owned-modal treatment as the space editor.
-        // Update Now / Skip This Version reply to Sparkle through the
-        // controller; close just tucks the sheet away, card stays.
+        // What's New: same owned-modal treatment as the space editor —
+        // native sheets were tried and rejected (animation too slow, scrim
+        // unfixably light-on-light, no styling knobs). Update Now / Skip
+        // This Version reply to Sparkle through the controller; close just
+        // tucks the sheet away, card stays.
         .overlay {
             if updateController.isShowingWhatsNew, let notes = updateController.releaseNotes {
                 ZStack {

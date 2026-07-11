@@ -85,6 +85,7 @@ final class UpdateController: NSObject, ObservableObject {
         isShowingWhatsNew = true
     }
 
+
     func closeWhatsNew() {
         isShowingWhatsNew = false
     }

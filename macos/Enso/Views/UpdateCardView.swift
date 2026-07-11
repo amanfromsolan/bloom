@@ -43,6 +43,7 @@ private struct UpdateCardBody: View {
     let onDismiss: () -> Void
 
     @State private var closeHovered = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         // Icon left, text right, action button under the text: the sidebar is
@@ -103,10 +104,11 @@ private struct UpdateCardBody: View {
         .padding(.vertical, 9)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Theme.ink.opacity(0.05))
+                // Light mode: a solid white card, like the selected tab.
+                .fill(colorScheme == .light ? Color.white : Theme.ink.opacity(0.05))
                 .overlay(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(Theme.ink.opacity(0.07))
+                        .strokeBorder(colorScheme == .light ? Color.clear : Theme.ink.opacity(0.07))
                 )
         )
         // Close floats on the card's corner instead of costing the title
@@ -252,12 +254,15 @@ private struct CardActionButton: View {
     let action: () -> Void
 
     @State private var hovered = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button(action: action) {
             Text(label)
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(Theme.text(0.95))
+                // Light mode: Theme.text is near-black, unreadable on the
+                // accent capsule — the label stays white there.
+                .foregroundStyle(colorScheme == .light ? Color.white : Theme.text(0.95))
                 .fixedSize()
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)

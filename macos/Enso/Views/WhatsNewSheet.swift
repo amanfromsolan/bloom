@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Release-notes modal shown when an update is waiting: what changed in the
@@ -22,6 +23,9 @@ struct WhatsNewSheet: View {
     }
 
     let content: Content
+    /// False when presented inside a native macOS sheet, which brings its
+    /// own background, radius, and shadow.
+    var ownsChrome: Bool = true
     let onUpdate: () -> Void
     let onSkip: () -> Void
     let onDismiss: () -> Void
@@ -44,10 +48,10 @@ struct WhatsNewSheet: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("What's New in Enso")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 18, weight: .semibold))
 
                     Text("Version \(content.version) is ready to install.")
-                        .font(.system(size: 12))
+                        .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }
 
@@ -79,7 +83,7 @@ struct WhatsNewSheet: View {
                     moreBelowFooter = more
                 }
             }
-            .frame(maxHeight: 300)
+            .frame(maxHeight: 380)
 
             hairline(visible: moreBelowFooter)
                 .padding(.bottom, 14)
@@ -99,13 +103,13 @@ struct WhatsNewSheet: View {
                         Text("Update Now")
                     }
                 }
-                .buttonStyle(ModalPrimaryButtonStyle())
+                .buttonStyle(ModalPrimaryButtonStyle(accent: .accentColor))
                 .keyboardShortcut(.defaultAction)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 18)
         }
-        .frame(width: 420)
+        .frame(width: 495)
         .overlay(alignment: .topTrailing) {
             Button {
                 onDismiss()
@@ -124,22 +128,22 @@ struct WhatsNewSheet: View {
             .keyboardShortcut(.cancelAction)
             .padding(10)
         }
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Theme.panel)
-                .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
-                .shadow(color: .black.opacity(0.65), radius: 70, y: 30)
-        )
+        .clipShape(RoundedRectangle(cornerRadius: ownsChrome ? 24 : 0, style: .continuous))
+        .background {
+            if ownsChrome {
+                ModalFrostBackdrop()
+            }
+        }
     }
 
     private var notesList: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 22) {
             ForEach(content.sections) { section in
                 SectionView(section: section)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18)
     }
 
     /// Edge-to-edge separator that fades in while content is scrolled
@@ -163,7 +167,7 @@ struct WhatsNewSheet: View {
                 // just show their lines without a header.
                 if !section.title.isEmpty {
                     Text(section.title.uppercased())
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .tracking(1.1)
                         .foregroundStyle(Theme.text(0.4))
                         .padding(.bottom, 1)
@@ -172,13 +176,13 @@ struct WhatsNewSheet: View {
                 ForEach(section.items, id: \.self) { item in
                     HStack(alignment: .firstTextBaseline, spacing: 9) {
                         Text("·")
-                            .font(.system(size: 12.5, weight: .bold))
+                            .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(Theme.text(0.35))
 
                         Text(item)
-                            .font(.system(size: 12.5))
+                            .font(.system(size: 15))
                             .foregroundStyle(Theme.text(0.78))
-                            .lineSpacing(2)
+                            .lineSpacing(3.5)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }

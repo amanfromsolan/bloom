@@ -1661,7 +1661,7 @@ struct SpaceEditorSheet: View {
                         Text(isCreating ? "Create Space" : "Save")
                     }
                 }
-                .buttonStyle(ModalPrimaryButtonStyle())
+                .buttonStyle(ModalPrimaryButtonStyle(accent: .accentColor))
                 .keyboardShortcut(.defaultAction)
             }
             .padding(.horizontal, 24)
@@ -1682,17 +1682,17 @@ struct SpaceEditorSheet: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .onHover { closeHovered = $0 }
+            .onHover { inside in
+                closeHovered = inside
+                inside ? NSCursor.arrow.push() : NSCursor.pop()
+            }
             .padding(10)
         }
         // Fully owned chrome: presented as an in-window overlay, not a
-        // macOS sheet, so no system border or forced corner radius.
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Theme.panel)
-                .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
-                .shadow(color: .black.opacity(0.65), radius: 70, y: 30)
-        )
+        // macOS sheet, so no system border or forced corner radius. Same
+        // frost as What's New.
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(ModalFrostBackdrop())
         .onAppear {
             if case .edit(let space) = mode {
                 name = space.name
@@ -1727,10 +1727,11 @@ struct SpaceEditorSheet: View {
         } label: {
             ZStack {
                 // Recessed well so the preview reads as a distinct disc.
-                // inverseInk keeps it darker-than-panel in dark mode and a
-                // soft raised well in light mode, so the ink icon reads in both.
+                // A dedicated token keeps the black well in dark mode and
+                // swaps to a visible grey in light mode, where a white well
+                // would disappear into the light panel.
                 Circle()
-                    .fill(Theme.inverseInk.opacity(0.32))
+                    .fill(Theme.iconWell)
 
                 // Keyed on what's showing, so every swap — a shuffle or the
                 // hover plus — plays the shrink-out / spring-in transition
@@ -1794,6 +1795,7 @@ struct SpaceEditorSheet: View {
                 .animation(.spring(response: 0.3, dampingFraction: 0.42), value: shufflePop)
         }
         .buttonStyle(.plain)
+        .arrowCursorOnHover()
         .help("Shuffle icon")
     }
 
@@ -1889,6 +1891,7 @@ struct SpaceEditorSheet: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .arrowCursorOnHover()
     }
 
     private func searchField(text: Binding<String>, prompt: String) -> some View {
@@ -2075,7 +2078,10 @@ private struct PickerTileStyle: ButtonStyle {
                 // Pressing brings the hovered swell back down to rest, so the
                 // click reads as a push into the grid.
                 .scaleEffect(configuration.isPressed ? 1 : (hovering ? 1.04 : 1))
-                .onHover { hovering = $0 }
+                .onHover { inside in
+                    hovering = inside
+                    inside ? NSCursor.arrow.push() : NSCursor.pop()
+                }
                 .animation(.snappy(duration: 0.12), value: configuration.isPressed)
                 .animation(.easeInOut(duration: 0.14), value: hovering)
         }
@@ -2108,32 +2114,67 @@ private struct IconSwapEffect: ViewModifier {
     }
 }
 
+extension View {
+    /// Forces the arrow cursor while the pointer is over an interactive
+    /// control. The space editor hosts a focused `TextField`, whose AppKit
+    /// I-beam cursor rect otherwise bleeds onto the surrounding buttons and
+    /// picker tiles; pushing/popping an explicit arrow cursor on hover keeps
+    /// the I-beam confined to the actual text fields.
+    func arrowCursorOnHover() -> some View {
+        onHover { inside in
+            inside ? NSCursor.arrow.push() : NSCursor.pop()
+        }
+    }
+}
+
 // MARK: - Button styles
 
 /// Solid white primary action, web-modal style: full-width rounded
 /// rectangle, dark label, no gradient or border. Brightens on hover.
 struct ModalPrimaryButtonStyle: ButtonStyle {
+    /// Optional tint override (e.g. `.accentColor` for the system blue);
+    /// nil keeps the ink fill with its appearance-aware ramp.
+    var accent: Color? = nil
+
     func makeBody(configuration: Configuration) -> some View {
-        Styled(configuration: configuration)
+        Styled(configuration: configuration, accent: accent)
     }
 
     private struct Styled: View {
         let configuration: Configuration
+        let accent: Color?
+        @Environment(\.colorScheme) private var scheme
         @State private var hovering = false
+
+        // Light mode drives the fill near-solid so the primary button reads
+        // as dark as the app's primary text (`Theme.ink` is near-black there);
+        // the airy 0.9 ramp that looks right as a white button on dark is far
+        // too pale as a dark button on the light panel. Dark mode keeps its
+        // original white ramp untouched.
+        private var fillOpacity: Double {
+            if accent != nil {
+                return configuration.isPressed ? 0.8 : (hovering ? 0.9 : 1)
+            }
+            if scheme == .light {
+                return configuration.isPressed ? 0.86 : (hovering ? 0.92 : 1)
+            }
+            return configuration.isPressed ? 0.78 : (hovering ? 1 : 0.9)
+        }
 
         var body: some View {
             configuration.label
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.inverseInk.opacity(0.88))
+                .foregroundStyle(accent == nil ? Theme.inverseInk.opacity(0.88) : Color.white.opacity(0.95))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Theme.ink.opacity(
-                            configuration.isPressed ? 0.78 : (hovering ? 1 : 0.9)
-                        ))
+                        .fill((accent ?? Theme.ink).opacity(fillOpacity))
                 )
-                .onHover { hovering = $0 }
+                .onHover { inside in
+                    hovering = inside
+                    inside ? NSCursor.arrow.push() : NSCursor.pop()
+                }
                 .animation(.snappy(duration: 0.12), value: configuration.isPressed)
         }
     }
@@ -2161,7 +2202,10 @@ struct ModalSecondaryButtonStyle: ButtonStyle {
                             configuration.isPressed ? 0.16 : (hovering ? 0.13 : 0.09)
                         ))
                 )
-                .onHover { hovering = $0 }
+                .onHover { inside in
+                    hovering = inside
+                    inside ? NSCursor.arrow.push() : NSCursor.pop()
+                }
                 .animation(.snappy(duration: 0.12), value: configuration.isPressed)
         }
     }
