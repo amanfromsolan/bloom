@@ -8,6 +8,10 @@ struct TerminalRootView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var spaceEditor: SpaceEditorSheet.Mode?
     @State private var isPeeking = false
+    // Full screen relocates the sidebar toggle: the titlebar (and the
+    // traffic lights with it) lives in the auto-hiding reveal strip there,
+    // so a persistent copy sits at the window's top-leading instead.
+    @State private var isFullScreen = false
     // Card corner radius, kept concentric with the window's own curve so the
     // frame reads as one shape. Read live off the NSWindow (see
     // WindowCornerRadiusReader); starts at the fixed floor and only grows once
@@ -106,7 +110,8 @@ struct TerminalRootView: View {
         .background(TrafficLightInset(
             buttonsHidden: !(store.isSidebarVisible || isPeeking),
             isSidebarVisible: store.isSidebarVisible,
-            onToggleSidebar: { store.isSidebarVisible.toggle() }
+            onToggleSidebar: { store.isSidebarVisible.toggle() },
+            onFullScreenChange: { isFullScreen = $0 }
         ))
         // Publishes the window's live corner radius up into the card radius so
         // the two curves stay concentric.
@@ -140,6 +145,17 @@ struct TerminalRootView: View {
         .onChange(of: store.isSidebarVisible) { _, visible in
             if visible {
                 isPeeking = false
+            }
+        }
+        // Above the peek overlay so it stays clickable on a hovered-in
+        // sidebar; in full screen this is the only toggle affordance.
+        .overlay(alignment: .topLeading) {
+            if isFullScreen {
+                SidebarToggleButton(isSidebarVisible: store.isSidebarVisible) {
+                    store.isSidebarVisible.toggle()
+                }
+                .padding(.leading, 16)
+                .padding(.top, 8)
             }
         }
         .overlay(alignment: .top) {
@@ -554,6 +570,9 @@ private struct TrafficLightInset: NSViewRepresentable {
     var buttonsHidden: Bool
     var isSidebarVisible: Bool
     var onToggleSidebar: () -> Void
+    /// The coordinator owns full-screen truth (it sees the window, including
+    /// one restored straight into full screen at launch) and reports it up.
+    var onFullScreenChange: (Bool) -> Void
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -564,6 +583,7 @@ private struct TrafficLightInset: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onFullScreenChange = onFullScreenChange
         context.coordinator.setButtonsHidden(buttonsHidden)
         context.coordinator.updateToggle(isSidebarVisible: isSidebarVisible, action: onToggleSidebar)
     }
@@ -574,25 +594,61 @@ private struct TrafficLightInset: NSViewRepresentable {
     final class Coordinator {
         private weak var window: NSWindow?
         private var buttonsHidden = false
+        private var isFullScreen = false
+        var onFullScreenChange: (Bool) -> Void = { _ in }
         private var isSidebarVisible = true
         private var toggleAction: () -> Void = {}
         private var toggleHost: NSHostingView<TitlebarSidebarToggle>?
+
+        nonisolated(unsafe) private var fullScreenObservers: [NSObjectProtocol] = []
+
+        deinit {
+            fullScreenObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        }
 
         func attach(to window: NSWindow?) {
             guard let window, self.window !== window else { return }
             self.window = window
 
-            // Empty unified toolbar: AppKit gives the titlebar its taller
-            // metrics and vertically centers the traffic lights in it — the
-            // standard technique for lowered lights without frame-fighting.
+            // The window may already be in full screen (state restoration
+            // relaunches straight into it), in which case the toolbar must
+            // not be installed — see below.
+            let startsFullScreen = window.styleMask.contains(.fullScreen)
+            if !startsFullScreen {
+                installToolbar(in: window)
+            }
+            window.titlebarAppearsTransparent = true
+
+            // In full screen the titlebar stops overlaying and the unified
+            // toolbar reserves real layout space — a giant blank bar across
+            // the top. Drop the toolbar for the duration; the lowered
+            // traffic lights only matter in windowed mode anyway.
+            fullScreenObservers = [
+                NotificationCenter.default.addObserver(
+                    forName: NSWindow.willEnterFullScreenNotification, object: window, queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor in self?.setFullScreen(true) }
+                },
+                NotificationCenter.default.addObserver(
+                    forName: NSWindow.willExitFullScreenNotification, object: window, queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor in self?.setFullScreen(false) }
+                },
+            ]
+
+            installToggle(in: window)
+            applyVisibility(animated: false)
+            setFullScreen(startsFullScreen, force: true)
+        }
+
+        /// Empty unified toolbar: AppKit gives the titlebar its taller
+        /// metrics and vertically centers the traffic lights in it — the
+        /// standard technique for lowered lights without frame-fighting.
+        private func installToolbar(in window: NSWindow) {
             let toolbar = NSToolbar(identifier: "EnsoTitlebar")
             toolbar.showsBaselineSeparator = false
             window.toolbar = toolbar
             window.toolbarStyle = .unified
-            window.titlebarAppearsTransparent = true
-
-            installToggle(in: window)
-            applyVisibility(animated: false)
         }
 
         func setButtonsHidden(_ hidden: Bool) {
@@ -600,6 +656,23 @@ private struct TrafficLightInset: NSViewRepresentable {
             buttonsHidden = hidden
             applyVisibility(animated: true)
             pushToggleState()
+        }
+
+        /// Full screen shows a content-hosted toggle instead; conceal the
+        /// titlebar copy so the reveal strip doesn't show a duplicate, swap
+        /// the toolbar out/in, and report upward for the SwiftUI overlay.
+        private func setFullScreen(_ fullScreen: Bool, force: Bool = false) {
+            guard force || fullScreen != isFullScreen else { return }
+            isFullScreen = fullScreen
+            if let window {
+                if fullScreen {
+                    window.toolbar = nil
+                } else if window.toolbar == nil {
+                    installToolbar(in: window)
+                }
+            }
+            pushToggleState()
+            onFullScreenChange(fullScreen)
         }
 
         func updateToggle(isSidebarVisible: Bool, action: @escaping () -> Void) {
@@ -638,7 +711,7 @@ private struct TrafficLightInset: NSViewRepresentable {
         private func currentToggleState() -> TitlebarSidebarToggle {
             TitlebarSidebarToggle(
                 isSidebarVisible: isSidebarVisible,
-                isConcealed: buttonsHidden,
+                isConcealed: buttonsHidden || isFullScreen,
                 action: toggleAction
             )
         }
