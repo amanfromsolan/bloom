@@ -2,8 +2,8 @@ import SwiftUI
 
 struct TerminalWorkspaceView: View {
     @ObservedObject var store: TerminalSessionStore
-    // Live theme switches change GhosttyRuntime.themeBackground; observing
-    // the manager re-evaluates the body so the backing color tracks it.
+    // The terminal background is published on the manager; observing it both
+    // re-evaluates the body and hands back the fresh color on every apply.
     @ObservedObject private var themeManager = TerminalThemeManager.shared
     @State private var isRenaming = false
     @State private var draftTitle = ""
@@ -39,7 +39,7 @@ struct TerminalWorkspaceView: View {
                     }
                 }
         }
-        .background(GhosttyRuntime.shared.themeBackground)
+        .background(themeManager.themeBackground)
         // Space/tab switches run inside withAnimation; a cross-fade here
         // makes the SwiftUI header and the Metal-backed terminal (which
         // can't fade) diverge, flashing the empty state through. Commit

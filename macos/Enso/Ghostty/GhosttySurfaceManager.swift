@@ -56,6 +56,10 @@ final class GhosttySurfaceManager {
     }
 
     func closeSurface(for sessionID: TerminalSession.ID) {
+        // A session closed before its surface ever mounted (the preview tab
+        // ⌘W'd mid-pick) would otherwise strand its pending command forever;
+        // view(for:) is the only other drain.
+        spawnCommands.removeValue(forKey: sessionID)
         guard let view = views.removeValue(forKey: sessionID) else { return }
         view.removeFromSuperview()
         view.shutdown()

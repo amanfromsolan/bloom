@@ -83,7 +83,13 @@ final class TerminalSessionStore: ObservableObject {
         if activeSpace.sessions.isEmpty, let first = self.spaces.first(where: { !$0.sessions.isEmpty }) {
             self.activeSpaceID = first.id
         }
-        selection = activeSpace.lastSelection ?? activeSpace.sessions.first?.id
+        // Validate containment the way setActiveSpace does: a persisted
+        // lastSelection can name a session that no longer exists (e.g. a
+        // preview tab excluded from the snapshot on a crash mid-pick), which
+        // would otherwise select nothing and show "No Tabs".
+        selection = activeSpace.lastSelection.flatMap { last in
+            activeSpace.sessions.contains { $0.id == last } ? last : nil
+        } ?? activeSpace.sessions.first?.id
 
         if persistToDisk {
             let timer = Timer(timeInterval: 30 * 60, repeats: true) { [weak self] _ in
@@ -157,7 +163,12 @@ final class TerminalSessionStore: ObservableObject {
         if activeSpaceID == spaceID {
             let fallback = spaces[min(index, spaces.count - 1)]
             activeSpaceID = fallback.id
-            selection = fallback.lastSelection ?? fallback.sessions.first?.id
+            // Same containment check as init/setActiveSpace: a space's
+            // lastSelection can go stale in memory (e.g. an ephemeral tab
+            // pruned while another space was active).
+            selection = fallback.lastSelection.flatMap { last in
+                fallback.sessions.contains { $0.id == last } ? last : nil
+            } ?? fallback.sessions.first?.id
             // Deleting the active space activates the fallback; its per-space
             // theme has to follow just like an ordinary space switch does.
             TerminalThemeManager.shared.activeSpaceDidChange(fallback.id)
@@ -286,9 +297,21 @@ final class TerminalSessionStore: ObservableObject {
     /// persistence can exclude it: state.json saves on every mutation, and a
     /// crash mid-pick must not resurrect the tab on the next launch.
     private(set) var themePreviewSessionID: TerminalSession.ID?
+    /// The selection to return to once the theme pick ends — snapshotted
+    /// before the preview grabs the selection. Persisted in place of the
+    /// preview when saving (see `save`), so a relaunch mid-pick doesn't point
+    /// `lastSelection` at the excluded preview tab.
+    private(set) var themePreviewReturnID: TerminalSession.ID?
 
+    /// Opens the disposable theme-preview tab, snapshotting the tab to return
+    /// to when the pick ends. Returns the new session's id so the caller can
+    /// register its spawn command before the surface first mounts.
     @discardableResult
-    func createThemePreviewSession() -> TerminalSession.ID {
+    func openThemePreview() -> TerminalSession.ID {
+        // Re-entry can't normally happen (every exit closes the preview), but
+        // reusing an existing one keeps "at most one preview tab" structural.
+        if let existing = themePreviewSessionID { return existing }
+        themePreviewReturnID = selection
         // titleOrigin .user pins the name against shell titles and auto-naming.
         let session = TerminalSession(
             title: "Terminal Preview",
@@ -304,6 +327,22 @@ final class TerminalSessionStore: ObservableObject {
         multiSelection = [session.id]
         save()
         return session.id
+    }
+
+    /// Closes the theme-preview tab and reveals the tab the pick started from.
+    /// Tolerates the user having ⌘W'd either tab mid-pick: acts only on tabs
+    /// that still exist. Idempotent — a no-op once the ids are cleared.
+    func closeThemePreview() {
+        let previewID = themePreviewSessionID
+        let returnID = themePreviewReturnID
+        themePreviewSessionID = nil
+        themePreviewReturnID = nil
+        if let previewID, sessions.contains(where: { $0.id == previewID }) {
+            close(sessionID: previewID)
+        }
+        if let returnID, sessions.contains(where: { $0.id == returnID }) {
+            reveal(returnID)
+        }
     }
 
     func createFolder(inSpace spaceID: SidebarSpace.ID? = nil) {
@@ -801,7 +840,13 @@ final class TerminalSessionStore: ObservableObject {
 
     private func save() {
         guard persistToDisk else { return }
-        withSpace(activeSpaceID) { $0.lastSelection = selection }
+        // The preview tab is excluded from the snapshot below, so lastSelection
+        // must never name it: while the preview is selected, persist the tab
+        // we'll return to instead, or a relaunch mid-pick restores a selection
+        // pointing at a session that no longer exists ("No Tabs" over a full
+        // sidebar).
+        let persistedSelection = selection == themePreviewSessionID ? themePreviewReturnID : selection
+        withSpace(activeSpaceID) { $0.lastSelection = persistedSelection }
         // The theme-preview tab is strictly session-only; persisting it would
         // restore a dead "Terminal Preview" tab after a crash mid-pick.
         var snapshot = spaces

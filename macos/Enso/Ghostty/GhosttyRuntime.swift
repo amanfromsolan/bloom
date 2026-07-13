@@ -194,6 +194,10 @@ final class GhosttyRuntime {
             ghostty_config_free(oldConfig)
         }
         config = newConfig
+
+        // loadConfig refreshed our own themeBackground; republish it so chrome
+        // observing the manager repaints in step with this recolor.
+        TerminalThemeManager.shared.updateThemeBackground(themeBackground)
     }
 
     private func installObservers() {

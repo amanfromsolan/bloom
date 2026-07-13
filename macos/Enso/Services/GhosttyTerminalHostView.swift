@@ -12,14 +12,15 @@ struct GhosttyTerminalHostView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
         container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor(GhosttyRuntime.shared.themeBackground).cgColor
+        container.layer?.backgroundColor = NSColor(TerminalThemeManager.shared.themeBackground).cgColor
         return container
     }
 
     func updateNSView(_ container: NSView, context: Context) {
         // Track live theme changes; the container peeks through during
-        // resizes and while no surface is mounted.
-        container.layer?.backgroundColor = NSColor(GhosttyRuntime.shared.themeBackground).cgColor
+        // resizes and while no surface is mounted. updateNSView re-runs when
+        // the observing parent (TerminalWorkspaceView) repaints on a recolor.
+        container.layer?.backgroundColor = NSColor(TerminalThemeManager.shared.themeBackground).cgColor
         guard let session else {
             container.subviews.forEach { $0.removeFromSuperview() }
             return

@@ -51,27 +51,43 @@ final class TerminalThemeManager: ObservableObject {
     /// before the user has committed anything.
     @Published private(set) var recentThemeNames: [String]
 
-    /// Bumped on every live apply (preview or commit) so chrome that blends
-    /// with the terminal background can re-read GhosttyRuntime.themeBackground.
+    /// True while `recentThemeNames` is still the well-known seed (the durable
+    /// key is absent). The picker titles the section "Suggested" rather than
+    /// "Recent" until the first real commit writes the key and flips this.
+    private(set) var recentsAreSeeded: Bool
+
+    /// Bumped on every live apply (preview or commit) so chrome observing the
+    /// manager re-renders. The applied *name* mirror; the applied *background*
+    /// is `themeBackground` below.
     @Published private(set) var appliedThemeName: String?
+
+    /// The running terminal's background color, republished from
+    /// GhosttyRuntime whenever it (re)loads config. Chrome that blends with
+    /// the terminal (the header strip, the palette shadows) observes this
+    /// directly instead of reaching into the runtime and relying on the
+    /// re-render ordering to have refreshed the runtime's copy first.
+    @Published private(set) var themeBackground: Color
 
     /// True between the palette starting a live preview and either a commit
     /// or a cancel. While previewing, space switches don't reapply.
     private(set) var isPreviewing = false
 
     private weak var store: TerminalSessionStore?
-    private var accentCache: [String: Color] = [:]
     private var previewWorkItem: DispatchWorkItem?
 
     private init() {
         themes = Self.enumerateBundledThemes()
         let storedRecents = UserDefaults.standard.stringArray(forKey: Self.recentsDefaultsKey)
+        recentsAreSeeded = storedRecents == nil
         recentThemeNames = storedRecents
             ?? ["Catppuccin Mocha", "TokyoNight", "Nord", "Gruvbox Dark"]
         // Seed the applied name from the durable mirror. The running config
         // was built from the override file at startup (GhosttyRuntime.loadConfig
         // loads it), and this key was written alongside it on the last apply.
         appliedThemeName = UserDefaults.standard.string(forKey: Self.appliedDefaultsKey)
+        // Seed from the runtime's initial config read (its default until
+        // ensureStarted runs); attach() and every reload republish the real one.
+        themeBackground = GhosttyRuntime.shared.themeBackground
     }
 
     /// Called once from the root view. Reconciles the on-disk override (which
@@ -79,6 +95,9 @@ final class TerminalThemeManager: ObservableObject {
     /// the committed preference for the active space.
     func attach(to store: TerminalSessionStore) {
         self.store = store
+        // Seed from the runtime's startup read (config is built by then), then
+        // the reloadConfig below republishes it after the override is applied.
+        themeBackground = GhosttyRuntime.shared.themeBackground
         // Unconditional write + reload, bypassing apply()'s no-change guard:
         // the override file must exist even with no theme picked (it pins
         // background-opacity), and one written by an older build may lack
@@ -105,11 +124,20 @@ final class TerminalThemeManager: ObservableObject {
         UserDefaults.standard.dictionary(forKey: Self.bySpaceDefaultsKey) as? [String: String] ?? [:]
     }
 
+    /// Whether Enso holds any committed theme preference (an all-spaces choice
+    /// or any per-space override). Drives the picker's "Use My Ghostty Config"
+    /// reset row, which is pointless when there's nothing to reset.
+    var hasThemePreference: Bool {
+        allSpacesTheme != nil || !themeBySpace.isEmpty
+    }
+
     // MARK: - Live preview / commit
 
-    /// Recolors the running terminals to `name` without persisting anything.
-    /// Debounced a beat so held arrow keys don't rebuild the config per row.
-    func preview(_ name: String) {
+    /// Recolors the running terminals to `name` without persisting anything;
+    /// `nil` previews the user's own ghostty config (the "Use My Ghostty
+    /// Config" row). Debounced a beat so held arrow keys don't rebuild the
+    /// config per row.
+    func preview(_ name: String?) {
         isPreviewing = true
         previewWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -152,8 +180,25 @@ final class TerminalThemeManager: ObservableObject {
         recents.insert(name, at: 0)
         recentThemeNames = Array(recents.prefix(5))
         defaults.set(recentThemeNames, forKey: Self.recentsDefaultsKey)
+        // The recents list is now the user's own; the picker stops calling the
+        // section "Suggested".
+        recentsAreSeeded = false
 
         apply(name)
+    }
+
+    /// "Use My Ghostty Config": clears every Enso theme preference (all-spaces
+    /// and per-space) so the user's own ghostty config shows through, and
+    /// applies it live. The override file is still written by `apply(nil)` —
+    /// it pins background-opacity even with no theme.
+    func clearThemePreference() {
+        previewWorkItem?.cancel()
+        previewWorkItem = nil
+        isPreviewing = false
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: Self.allSpacesDefaultsKey)
+        defaults.removeObject(forKey: Self.bySpaceDefaultsKey)
+        apply(nil)
     }
 
     /// Per-space themes follow the active space; called from the store on
@@ -183,6 +228,13 @@ final class TerminalThemeManager: ObservableObject {
         } else {
             defaults.removeObject(forKey: Self.appliedDefaultsKey)
         }
+    }
+
+    /// Republished by GhosttyRuntime after it (re)loads config, carrying the
+    /// freshly resolved terminal background so observing chrome repaints in
+    /// step with the terminal recolor.
+    func updateThemeBackground(_ color: Color) {
+        themeBackground = color
     }
 
     /// Called from the store when a space is deleted: drops that space's
@@ -238,10 +290,10 @@ final class TerminalThemeManager: ObservableObject {
             // the user pins those keys.
             lines.append("theme = \(themeName)")
             let colors = themeColors(named: themeName)
-            if let background = colors.background {
+            if let background = colors.backgroundHex {
                 lines.append("background = \(background)")
             }
-            if let foreground = colors.foreground {
+            if let foreground = colors.foregroundHex {
                 lines.append("foreground = \(foreground)")
             }
         }
@@ -289,53 +341,17 @@ final class TerminalThemeManager: ObservableObject {
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    /// A representative color for a theme's row bullet: its ANSI blue
-    /// (palette 4), falling back to its foreground. Parsed from the bundled
-    /// theme file once and cached.
-    func accentColor(for name: String) -> Color {
-        if let cached = accentCache[name] { return cached }
-        let color = Self.parseAccent(named: name) ?? Theme.ink.opacity(0.55)
-        accentCache[name] = color
-        return color
-    }
-
-    private static func parseAccent(named name: String) -> Color? {
-        guard
-            let url = themesDirectoryURL?.appendingPathComponent(name),
-            let text = try? String(contentsOf: url, encoding: .utf8)
-        else { return nil }
-
-        var blue: Color?
-        var foreground: Color?
-        for line in text.split(separator: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("palette") {
-                // "palette = 4=#89b4fa"
-                let parts = trimmed.split(separator: "=", maxSplits: 2).map {
-                    $0.trimmingCharacters(in: .whitespaces)
-                }
-                if parts.count == 3, parts[1] == "4" {
-                    blue = color(fromHex: parts[2])
-                }
-            } else if trimmed.hasPrefix("foreground") {
-                let parts = trimmed.split(separator: "=", maxSplits: 1).map {
-                    $0.trimmingCharacters(in: .whitespaces)
-                }
-                if parts.count == 2 {
-                    foreground = color(fromHex: parts[1])
-                }
-            }
-            if blue != nil { break }
-        }
-        return blue ?? foreground
-    }
-
-    /// A theme's own `background`/`foreground`, as normalized `#rrggbb`
-    /// strings ready to be written into the override file. Parsed from the
-    /// bundled theme file once and cached (same pattern as accent colors).
+    /// One theme's parsed colors, read from its bundled file once and cached:
+    /// `#rrggbb` hex strings for the override file, resolved `Color`s for the
+    /// palette-row swatch, and an accent (ANSI palette-4, else foreground) for
+    /// the fallback dot. One pass, one cache, feeding every call site below.
     private struct ThemeColors {
-        var background: String?
-        var foreground: String?
+        var backgroundHex: String?
+        var foregroundHex: String?
+        var background: Color?
+        var foreground: Color?
+        /// palette-4 (ANSI blue) else foreground; nil when neither parses.
+        var accent: Color?
     }
 
     private static var themeColorsCache: [String: ThemeColors] = [:]
@@ -354,22 +370,51 @@ final class TerminalThemeManager: ObservableObject {
             let text = try? String(contentsOf: url, encoding: .utf8)
         else { return colors }
 
+        var paletteBlueHex: String?
         for line in text.split(separator: "\n") {
             let parts = line.split(separator: "=", maxSplits: 1).map {
                 $0.trimmingCharacters(in: .whitespaces)
             }
             guard parts.count == 2 else { continue }
             switch parts[0] {
-            case "background" where colors.background == nil:
-                colors.background = normalizedHex(parts[1])
-            case "foreground" where colors.foreground == nil:
-                colors.foreground = normalizedHex(parts[1])
+            case "background" where colors.backgroundHex == nil:
+                colors.backgroundHex = normalizedHex(parts[1])
+            case "foreground" where colors.foregroundHex == nil:
+                colors.foregroundHex = normalizedHex(parts[1])
+            case "palette" where paletteBlueHex == nil:
+                // "palette = 4=#89b4fa"
+                let entry = parts[1].split(separator: "=", maxSplits: 1).map {
+                    $0.trimmingCharacters(in: .whitespaces)
+                }
+                if entry.count == 2, entry[0] == "4" {
+                    paletteBlueHex = normalizedHex(entry[1])
+                }
             default:
                 break
             }
-            if colors.background != nil, colors.foreground != nil { break }
         }
+
+        colors.background = colors.backgroundHex.flatMap(color(fromHex:))
+        colors.foreground = colors.foregroundHex.flatMap(color(fromHex:))
+        colors.accent = (paletteBlueHex ?? colors.foregroundHex).flatMap(color(fromHex:))
         return colors
+    }
+
+    /// A representative color for a theme's row bullet: its ANSI blue
+    /// (palette 4), falling back to its foreground, then a neutral ink.
+    func accentColor(for name: String) -> Color {
+        Self.themeColors(named: name).accent ?? Theme.ink.opacity(0.55)
+    }
+
+    /// A theme's background/foreground as `Color`s for the palette-row swatch,
+    /// or nil when the file has neither parseable — the caller falls back to
+    /// the accent dot.
+    func swatchColors(for name: String) -> (background: Color, foreground: Color)? {
+        let colors = Self.themeColors(named: name)
+        guard let background = colors.background, let foreground = colors.foreground else {
+            return nil
+        }
+        return (background, foreground)
     }
 
     /// Accepts `#1e1e2e`, `1e1e2e`, or either form in quotes; returns the

@@ -156,13 +156,10 @@ final class CommandCenter: ObservableObject {
 
     func close() {
         guard isOpen else { return }
-        // Dismissing mid-preview (Esc, click-away) reverts the terminal to
-        // the committed theme; after a commit this is a no-op.
-        TerminalThemeManager.shared.cancelPreview()
         // Before restoreFocus below, so the keyboard lands on the restored
         // tab rather than the just-closed preview. No-op outside the theme
         // flow (commit funnels here too, via commitTheme's close()).
-        closeThemePreviewTab()
+        tearDownThemeFlow()
         isOpen = false
         mode = .search
         removeMonitorWhenDrained()
@@ -175,9 +172,7 @@ final class CommandCenter: ObservableObject {
     /// preview on the way out. The caller sets the query afterwards, which
     /// rebuilds against the now-restored `.search` mode.
     private func resetToSearch() {
-        themePreviewArmed = false
-        TerminalThemeManager.shared.cancelPreview()
-        closeThemePreviewTab()
+        tearDownThemeFlow()
         submenuItems = nil
         mode = .search
     }
@@ -238,18 +233,12 @@ final class CommandCenter: ObservableObject {
 
     // MARK: - Theme preview tab
 
-    /// The disposable "Terminal Preview" tab open while the theme flow runs,
-    /// and the tab to return to once it ends.
-    private var themePreviewTabID: TerminalSession.ID?
-    private var themePreviewReturnTabID: TerminalSession.ID?
-
     /// What the preview tab shows at spawn: the 16 ANSI colors as text and
     /// background swatches, the common attributes, a diff hunk, and a
-    /// build-status line — the everyday output a theme actually has to
-    /// carry. The final exec drops into
-    /// the user's shell so the tab ends at a live prompt. Self-contained
-    /// escape codes only — nothing is written to disk and no shell config is
-    /// involved.
+    /// build-status line — the everyday output a theme actually has to carry.
+    /// The final exec drops into the user's shell (as a login shell, so the
+    /// tab ends at the same prompt a normal tab would). Self-contained escape
+    /// codes only — nothing is written to disk.
     ///
     /// Shape matters: on macOS libghostty embeds this whole string into
     /// `bash --noprofile --norc -c "exec -l <string>"` (see execCommand in
@@ -257,6 +246,8 @@ final class CommandCenter: ObservableObject {
     /// swallows everything after the first statement of a bare multi-line
     /// script. It must be a single exec-able unit: `/bin/sh -c '…'`, with
     /// only double quotes inside so the single-quoted wrapper never closes.
+    /// That `exec -l` wrapping makes the outer `/bin/sh` a login shell, so
+    /// `/etc/profile` and `~/.profile` do run before the script.
     private static let themePreviewCommand = #"""
     /bin/sh -c '
     printf "\n  \033[1mTheme Preview\033[0m\n\n  "
@@ -275,91 +266,78 @@ final class CommandCenter: ObservableObject {
     printf "  \033[32m+    int size = read_size();\033[0m\n"
     printf "\n  \033[32m❯\033[0m make build\n"
     printf "  \033[32m✓ build succeeded\033[0m in 2.4s   \033[33m⚠ 2 warnings\033[0m   \033[31m✗ 1 test failed\033[0m\n\n"
-    exec "${SHELL:-/bin/zsh}"
+    exec "${SHELL:-/bin/zsh}" -l
     '
     """#
 
-    private func openThemePreviewTab() {
-        // Re-entry can't normally happen (every exit tears down), but the
-        // guard makes "at most one preview tab" structural.
-        guard let store, themePreviewTabID == nil else { return }
-        themePreviewReturnTabID = store.selection
-        let id = store.createThemePreviewSession()
-        GhosttySurfaceManager.shared.setSpawnCommand(Self.themePreviewCommand, for: id)
-        themePreviewTabID = id
-    }
-
-    /// Every exit from the theme flow funnels here: commit and palette
-    /// dismissal via close(), backspacing the token via exitThemePicker(),
-    /// and ⇧⌘P's resetToSearch().
-    private func closeThemePreviewTab() {
-        guard let id = themePreviewTabID else { return }
-        themePreviewTabID = nil
-        defer { themePreviewReturnTabID = nil }
-        guard let store else { return }
-        // The user may have closed the preview tab (or the return tab)
-        // manually mid-pick; act only on tabs that still exist.
-        if store.sessions.contains(where: { $0.id == id }) {
-            store.close(sessionID: id)
-        }
-        if let returnID = themePreviewReturnTabID,
-           store.sessions.contains(where: { $0.id == returnID }) {
-            store.reveal(returnID)
-        }
+    /// Tears down the theme flow exactly once, from every exit path: commit
+    /// (via close()), Esc/click-away (close()), backspacing the token
+    /// (exitThemePicker()), and ⇧⌘P (resetToSearch()). Disarms live preview,
+    /// reverts an uncommitted preview, and closes the disposable preview tab
+    /// (revealing the tab the pick started from). The store owns the tab
+    /// lifecycle; a commit's cancelPreview is a no-op (commit cleared the flag).
+    private func tearDownThemeFlow() {
+        themePreviewArmed = false
+        TerminalThemeManager.shared.cancelPreview()
+        store?.closeThemePreview()
     }
 
     // MARK: - Theme picker flow
 
-    /// "Change Terminal Theme" → token mode listing themes, previewing live.
-    private func beginThemePicker() {
-        guard store != nil else {
-            close()
-            return
-        }
-        // Judge the live previews against known terminal content rather than
-        // whatever the user had open.
-        openThemePreviewTab()
+    /// Brackets a theme-stage swap: disarms live preview while the row list is
+    /// rebuilt and the highlight re-parked, anchors hover to the current cursor
+    /// so a row swapped under a stationary pointer can't hijack the restored
+    /// highlight (and re-fire its preview), then rearms.
+    private func transitionThemeStage(_ mutate: () -> Void) {
         themePreviewArmed = false
-        mode = .themePicker
-        query = "" // didSet rebuilds into the theme list
-        parkHighlightOnCurrentTheme()
-        // The list just replaced the command menu under the (likely
-        // stationary) cursor; ignore hover until the mouse moves so the parked
-        // highlight survives.
+        mutate()
         hoverAnchor = NSEvent.mouseLocation
         themePreviewArmed = true
     }
 
+    /// "Change Terminal Theme" → token mode listing themes, previewing live.
+    private func beginThemePicker() {
+        guard let store else {
+            close()
+            return
+        }
+        // Judge the live previews against known terminal content rather than
+        // whatever the user had open. The store owns the tab's lifecycle; we
+        // only register what it spawns with.
+        let previewID = store.openThemePreview()
+        GhosttySurfaceManager.shared.setSpawnCommand(Self.themePreviewCommand, for: previewID)
+        transitionThemeStage {
+            mode = .themePicker
+            query = "" // didSet rebuilds into the theme list
+            parkHighlightOnCurrentTheme()
+        }
+    }
+
     /// Backspace on an empty query pops the token back to plain search.
     private func exitThemePicker() {
-        themePreviewArmed = false
-        TerminalThemeManager.shared.cancelPreview()
-        closeThemePreviewTab()
+        tearDownThemeFlow()
         mode = .search
         query = ""
     }
 
     /// Enter on a theme row: keep previewing it and ask for the apply scope.
     private func beginThemeScope(_ name: String) {
-        TerminalThemeManager.shared.preview(name)
-        mode = .themeScope(name)
-        query = ""
-        // Scope rows replaced the theme list under a stationary cursor.
-        hoverAnchor = NSEvent.mouseLocation
+        transitionThemeStage {
+            TerminalThemeManager.shared.preview(name)
+            mode = .themeScope(name)
+            query = ""
+        }
     }
 
     /// Esc/backspace out of the scope step back to the list, still previewing.
     private func backToThemePicker(highlighting name: String?) {
-        themePreviewArmed = false
-        mode = .themePicker
-        query = ""
-        if let name, let index = items.firstIndex(where: { $0.id == "theme-\(name)" }) {
-            highlightedIndex = index
+        transitionThemeStage {
+            mode = .themePicker
+            query = ""
+            if let name, let index = items.firstIndex(where: { $0.themeName == name }) {
+                highlightedIndex = index
+            }
         }
-        // The list replaced the scope rows under a stationary cursor; hold off
-        // hover so the restored highlight isn't clobbered.
-        hoverAnchor = NSEvent.mouseLocation
-        themePreviewArmed = true
     }
 
     private func commitTheme(_ name: String, scope: TerminalThemeManager.Scope) {
@@ -369,23 +347,36 @@ final class CommandCenter: ObservableObject {
         close()
     }
 
+    /// "Use My Ghostty Config": clears every Enso theme preference and closes,
+    /// leaving the user's own ghostty config showing through.
+    private func useOwnGhosttyConfig() {
+        TerminalThemeManager.shared.clearThemePreference()
+        close()
+    }
+
     /// Live preview: the terminal recolors as the highlight moves through the
     /// theme list (arrow keys and hover both land here via highlightedIndex).
+    /// The pinned "Use My Ghostty Config" row previews the raw config (nil).
     private func previewHighlightedThemeIfNeeded() {
         guard themePreviewArmed, case .themePicker = mode,
               items.indices.contains(highlightedIndex)
         else { return }
-        let id = items[highlightedIndex].id
-        guard id.hasPrefix("theme-") else { return }
-        TerminalThemeManager.shared.preview(String(id.dropFirst("theme-".count)))
+        let item = items[highlightedIndex]
+        if let themeName = item.themeName {
+            TerminalThemeManager.shared.preview(themeName)
+        } else if item.id == Self.resetThemeRowID {
+            TerminalThemeManager.shared.preview(nil)
+        }
     }
 
     /// Opening the picker parks the highlight on the current theme (visible
     /// as its muted "Current" tag), so nothing recolors until the user moves.
+    /// With no committed theme the current row is the reset row, which sits at
+    /// index 0, so the default highlight already lands on it.
     private func parkHighlightOnCurrentTheme() {
         guard let store,
               let current = TerminalThemeManager.shared.effectiveThemeName(forSpace: store.activeSpaceID),
-              let index = items.firstIndex(where: { $0.id == "theme-\(current)" })
+              let index = items.firstIndex(where: { $0.themeName == current })
         else { return }
         highlightedIndex = index
     }
@@ -402,8 +393,13 @@ final class CommandCenter: ObservableObject {
         "Zenburn",
     ]
 
-    /// "Recent" (recently applied), "Popular" (curated), then "All Themes",
-    /// all query-filtered; a theme appears once, in its earliest section.
+    /// Stable id of the pinned "Use My Ghostty Config" row; recognized by the
+    /// live-preview path (it previews the raw config) and the reset action.
+    private static let resetThemeRowID = "theme-reset"
+
+    /// An optional pinned reset row, then "Recent"/"Suggested" (recently
+    /// applied or the seed), "Popular" (curated), and "All Themes", all
+    /// query-filtered; a theme appears once, in its earliest section.
     private func themePickerItems() -> [PaletteItem] {
         guard let store else { return [] }
         let manager = TerminalThemeManager.shared
@@ -417,24 +413,47 @@ final class CommandCenter: ObservableObject {
                 context: name == current ? "Current" : nil,
                 verb: "Select",
                 section: section,
+                themeName: name,
                 keepsOpen: true
             ) { [weak self] in
                 self?.beginThemeScope(name)
             }
         }
 
+        // Only offered once something is committed — nothing to reset otherwise.
+        // It's the "current" state exactly when no Enso theme is in effect.
+        var resetItems: [PaletteItem] = []
+        if manager.hasThemePreference {
+            resetItems = [PaletteItem(
+                id: Self.resetThemeRowID,
+                icon: .symbol("arrow.uturn.backward"),
+                title: "Use My Ghostty Config",
+                context: current == nil ? "Current" : nil,
+                verb: "Use",
+                section: .themeReset,
+                keepsOpen: true
+            ) { [weak self] in
+                self?.useOwnGhosttyConfig()
+            }]
+        }
+
         let recents = manager.recentThemeNames.filter { manager.themes.contains($0) }
         let popular = Self.popularThemeNames.filter {
             manager.themes.contains($0) && !recents.contains($0)
         }
-        let recentItems = recents.map { item($0, section: .recentThemes) }
+        // Until the first real commit the recents are a well-known seed, so the
+        // section is honestly titled "Suggested" rather than "Recent".
+        let recentSection: PaletteItem.Section = manager.recentsAreSeeded ? .suggestedThemes : .recentThemes
+        let recentItems = recents.map { item($0, section: recentSection) }
         let popularItems = popular.map { item($0, section: .popularThemes) }
         let allItems = manager.themes
             .filter { !recents.contains($0) && !popular.contains($0) }
             .map { item($0, section: .allThemes) }
 
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return recentItems + popularItems + allItems }
+        guard !trimmed.isEmpty else { return resetItems + recentItems + popularItems + allItems }
+        // The reset row is a fixed affordance, not a search hit; drop it while
+        // filtering.
         return Self.filter(recentItems, query: trimmed)
             + Self.filter(popularItems, query: trimmed)
             + Self.filter(allItems, query: trimmed)
@@ -1103,14 +1122,18 @@ struct PaletteItem: Identifiable {
         case symbol(String)
     }
 
-    /// Drives the grouped section headers in the palette.
+    /// Drives the grouped section headers in the palette. An empty raw value
+    /// renders no header (the pinned theme-reset row sits headerless above
+    /// the first titled section).
     enum Section: String {
         case suggestions = "Suggestions"
         case appearance = "Change Appearance To"
         case recentTabs = "Recent Tabs"
         case spaces = "Spaces"
         case commands = "Commands"
+        case themeReset = ""
         case recentThemes = "Recent"
+        case suggestedThemes = "Suggested"
         case popularThemes = "Popular"
         case allThemes = "All Themes"
         case themeScope = "Apply Theme For"
@@ -1129,6 +1152,10 @@ struct PaletteItem: Identifiable {
     /// A dimmed suffix after the title naming the result kind ("Tab"),
     /// shown when a bare title is ambiguous among mixed results.
     var kindLabel: String? = nil
+    /// The bundled theme this row applies, when it's a theme row — carried
+    /// directly so the live-preview and highlight-parking paths never parse
+    /// it back out of the id.
+    var themeName: String? = nil
     /// Hidden search terms fuzzy-matched alongside the title, never shown
     /// (e.g. "ghostty theme" for "Change Terminal Theme").
     var aliases: [String] = []
@@ -1220,7 +1247,10 @@ struct CommandCenterView: View {
                         // theme (~460 rows); eager row building would lag.
                         LazyVStack(alignment: .leading, spacing: 2) {
                             ForEach(Array(center.items.enumerated()), id: \.element.id) { index, item in
-                                if index == 0 || center.items[index - 1].section != item.section {
+                                // Skip empty-titled sections (the pinned theme-
+                                // reset row sits headerless at the very top).
+                                if (index == 0 || center.items[index - 1].section != item.section),
+                                   !item.section.rawValue.isEmpty {
                                     sectionHeader(item.section.rawValue, isFirst: index == 0)
                                 }
                                 row(item, at: index)
@@ -1353,9 +1383,30 @@ struct CommandCenterView: View {
                 .fill(color.opacity(isHighlighted ? 1 : 0.9))
                 .frame(width: 9, height: 9)
         case .themeAccent(let themeName):
-            Circle()
-                .fill(TerminalThemeManager.shared.accentColor(for: themeName).opacity(isHighlighted ? 1 : 0.9))
-                .frame(width: 9, height: 9)
+            // A small two-tone chip carrying the theme's own background and
+            // foreground — read at a glance across a 460-row list. Parsed
+            // lazily per visible row and cached; falls back to the accent dot
+            // when a theme file has no parseable colors.
+            if let colors = TerminalThemeManager.shared.swatchColors(for: themeName) {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(colors.background)
+                    .frame(width: 18, height: 14)
+                    .overlay(
+                        Text("Aa")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(colors.foreground)
+                    )
+                    .overlay(
+                        // Hairline so a light chip doesn't vanish into the card.
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .strokeBorder(Theme.ink.opacity(0.15), lineWidth: 0.5)
+                    )
+                    .opacity(isHighlighted ? 1 : 0.9)
+            } else {
+                Circle()
+                    .fill(TerminalThemeManager.shared.accentColor(for: themeName).opacity(isHighlighted ? 1 : 0.9))
+                    .frame(width: 9, height: 9)
+            }
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: 16, weight: .regular))
@@ -1424,10 +1475,11 @@ struct PaletteCardChrome: ViewModifier {
     // The card floats over the terminal, so the shadow reads against the
     // theme background. Over a light theme the wide, offset spill smears
     // like smog across the bright field; pull it in tight. Observing the
-    // manager re-evaluates this on every live preview/apply.
+    // manager re-evaluates this on every live preview/apply and hands back the
+    // fresh background.
     @ObservedObject private var themeManager = TerminalThemeManager.shared
 
-    private var overLight: Bool { GhosttyRuntime.shared.themeBackground.isLight }
+    private var overLight: Bool { themeManager.themeBackground.isLight }
 
     func body(content: Content) -> some View {
         content
@@ -1448,6 +1500,11 @@ struct PaletteCardChrome: ViewModifier {
                                 )
                             )
                     )
+                    // The dark-mode shadow weights were retuned deliberately
+                    // softer than a literal port (0.4→0.12 near, 0.65→0.195
+                    // far): a heavy spill read as grime against the terminal.
+                    // This chrome is shared with the Ctrl-Tab HUD on purpose,
+                    // so both wear the same lighter shadow.
                     .shadow(color: .black.opacity(0.12), radius: overLight ? 3 : 4, y: 2)
                     .shadow(
                         color: .black.opacity(overLight ? 0.18 : 0.195),

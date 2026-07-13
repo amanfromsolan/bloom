@@ -8,13 +8,12 @@ struct TerminalHeaderView: View {
     let session: TerminalSession
     let onRename: () -> Void
 
-    // The strip is filled with the terminal theme's background, so its ink
-    // has to follow that color, not the app appearance. Read live: the parent
-    // (TerminalWorkspaceView) observes TerminalThemeManager and re-evaluates
-    // its body on every apply/preview, which re-renders this view and re-reads
-    // the (by-then updated) themeBackground — flipping light↔dark in step with
-    // the terminal recolor.
-    private var background: Color { GhosttyRuntime.shared.themeBackground }
+    // The strip is filled with the terminal theme's background, so its ink has
+    // to follow that color, not the app appearance. Observe the manager so the
+    // published background flips this view's ink light↔dark in step with the
+    // terminal recolor.
+    @ObservedObject private var themeManager = TerminalThemeManager.shared
+    private var background: Color { themeManager.themeBackground }
 
     var body: some View {
         HStack(spacing: 8) {
