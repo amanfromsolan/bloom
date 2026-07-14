@@ -313,3 +313,33 @@ else
   preexec_functions+=(__ghostty_preexec)
   precmd_functions+=(__ghostty_precmd)
 fi
+
+# --- Enso agent-session shims (keep block minimal for upstream merges) ---
+# Best-effort parity with the zsh hook: /etc/profile's path_helper demotes
+# the shim dir Enso prepends at spawn, so re-prepend it once at the first
+# prompt. The hook stays registered but self-disables after one run.
+if [[ -n "${ENSO_SHIM_DIR:-}" && -d "${ENSO_SHIM_DIR:-}" ]]; then
+  _enso_fix_path() {
+    [[ -n "${_ENSO_PATH_FIXED:-}" ]] && return 0
+    _ENSO_PATH_FIXED=1
+    builtin local p="" d rest="${PATH}:"
+    while [[ -n "$rest" ]]; do
+      d="${rest%%:*}"
+      rest="${rest#*:}"
+      [[ "$d" == "$ENSO_SHIM_DIR" ]] && builtin continue
+      p="${p:+$p:}$d"
+    done
+    export PATH="$ENSO_SHIM_DIR:$p"
+    builtin hash -r 2>/dev/null
+  }
+  # Append to PROMPT_COMMAND, preserving its existing string/array type.
+  # shellcheck disable=SC2128,SC2178,SC2179
+  if [[ -z "${PROMPT_COMMAND[*]:-}" ]]; then
+    PROMPT_COMMAND="_enso_fix_path"
+  elif [[ $(builtin declare -p PROMPT_COMMAND 2>/dev/null) == "declare -a "* ]]; then
+    PROMPT_COMMAND+=(_enso_fix_path)
+  else
+    PROMPT_COMMAND+="; _enso_fix_path"
+  fi
+fi
+# --- end Enso block ---

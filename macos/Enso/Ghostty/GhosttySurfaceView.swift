@@ -27,11 +27,15 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
         }
     }
 
-    init(workingDirectory: String) {
+    init(workingDirectory: String, environmentVariables: [String: String] = [:], initialInput: String? = nil) {
         // Non-zero initial frame so the renderer never sees empty bounds.
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         registerForDraggedTypes(Array(Self.dropTypes))
-        createSurface(workingDirectory: workingDirectory)
+        createSurface(
+            workingDirectory: workingDirectory,
+            environmentVariables: environmentVariables,
+            initialInput: initialInput
+        )
     }
 
     @available(*, unavailable)
@@ -39,7 +43,11 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
         fatalError("init(coder:) is not supported")
     }
 
-    private func createSurface(workingDirectory: String) {
+    private func createSurface(
+        workingDirectory: String,
+        environmentVariables: [String: String],
+        initialInput: String?
+    ) {
         GhosttyRuntime.shared.ensureStarted()
         guard let app = GhosttyRuntime.shared.app else { return }
 
@@ -51,10 +59,37 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
         config.userdata = Unmanaged.passUnretained(self).toOpaque()
         config.scale_factor = Double(NSScreen.main?.backingScaleFactor ?? 2.0)
 
-        let directory = (workingDirectory as NSString).expandingTildeInPath
-        directory.withCString { directoryPtr in
-            config.working_directory = directoryPtr
+        // The C strings only need to outlive ghostty_surface_new (libghostty
+        // copies the config into the surface), but every pointer must be
+        // live at that one call — nested withCString scopes don't compose
+        // for a variable-length dictionary, so materialize them with strdup
+        // and free after the call returns.
+        var allocations: [UnsafeMutablePointer<CChar>] = []
+        defer { allocations.forEach { free($0) } }
+        func cString(_ string: String) -> UnsafePointer<CChar>? {
+            guard let pointer = strdup(string) else { return nil }
+            allocations.append(pointer)
+            return UnsafePointer(pointer)
+        }
+
+        config.working_directory = cString((workingDirectory as NSString).expandingTildeInPath)
+        if let initialInput, !initialInput.isEmpty {
+            // Typed into the PTY at spawn: a restored agent's resume command
+            // shows up in the terminal exactly as if the user ran it.
+            config.initial_input = cString(initialInput)
+        }
+
+        var envVars = environmentVariables
+            .sorted { $0.key < $1.key }
+            .map { ghostty_env_var_s(key: cString($0.key), value: cString($0.value)) }
+        if envVars.isEmpty {
             surface = ghostty_surface_new(app, &config)
+        } else {
+            envVars.withUnsafeMutableBufferPointer { buffer in
+                config.env_vars = buffer.baseAddress
+                config.env_var_count = buffer.count
+                surface = ghostty_surface_new(app, &config)
+            }
         }
 
         if surface == nil {

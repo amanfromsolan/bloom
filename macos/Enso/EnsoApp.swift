@@ -7,6 +7,34 @@
 
 import SwiftUI
 
+/// Root Application Support directory for this build identity. The debug
+/// build ("Enso Nightly") runs alongside the installed release Enso, and two
+/// live apps sharing state.json is last-writer-wins data loss — whichever
+/// saves second silently erases the other's tabs. So each identity gets its
+/// own folder; the nightly seeds itself once with a COPY of the release
+/// state so dev builds start from real tabs without ever writing back.
+enum EnsoAppSupport {
+    static let directory: URL = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #if DEBUG
+        let dir = appSupport.appendingPathComponent("Enso Nightly", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let releaseState = appSupport.appendingPathComponent("Enso/state.json")
+            if FileManager.default.fileExists(atPath: releaseState.path) {
+                try? FileManager.default.copyItem(
+                    at: releaseState,
+                    to: dir.appendingPathComponent("state.json")
+                )
+            }
+        }
+        return dir
+        #else
+        return appSupport.appendingPathComponent("Enso", isDirectory: true)
+        #endif
+    }()
+}
+
 /// Finder Services entry point: right-click a folder → "New Enso Terminal
 /// Here" opens a tab at that directory (declared in Info.plist NSServices).
 @MainActor
@@ -63,7 +91,7 @@ final class ServiceProvider: NSObject {
 @main
 struct EnsoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var sessionStore = TerminalSessionStore()
+    @StateObject private var sessionStore: TerminalSessionStore
 
     init() {
         // macOS ships with font smoothing off since Big Sur, which renders
@@ -78,6 +106,14 @@ struct EnsoApp: App {
 
         // Pin the app light/dark if the user chose to; system otherwise.
         AppAppearance.applyStored()
+
+        // Agent-session persistence must be ready before the first surface
+        // spawns a shell: shims on disk, and restore decisions made against
+        // the loaded tabs (which also drives orphan GC of old map files).
+        let store = TerminalSessionStore()
+        _sessionStore = StateObject(wrappedValue: store)
+        AgentShimInstaller.installIfNeeded()
+        AgentSessionStore.shared.bootstrap(knownTabIDs: Set(store.sessions.map(\.id)))
     }
 
     var body: some Scene {

@@ -293,6 +293,7 @@ private struct TabsSettings: View {
     @AppStorage(TerminalSessionStore.ephemeralTTLDefaultsKey) private var ephemeralTTLHours = 24
     @AppStorage(TabAutoNamer.enabledDefaultsKey) private var namingEnabled = true
     @AppStorage(TabAutoNamer.commandDefaultsKey) private var namingCommand = ""
+    @AppStorage(AgentSessionStore.restoreEnabledDefaultsKey) private var resumeAgentSessions = true
 
     private static let customChoice = "Custom"
     @State private var namingChoice = TabAutoNamer.presetCommands[0].name
@@ -366,6 +367,18 @@ private struct TabsSettings: View {
                 }
                 .labelsHidden()
                 .fixedSize()
+            }
+        }
+
+        SettingsGroup("Agents") {
+            SettingsRow(
+                "Resume agent sessions on relaunch",
+                caption: "A tab that was running claude or codex when you quit picks its conversation back up. Takes effect for new tabs."
+            ) {
+                Toggle("", isOn: $resumeAgentSessions)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
             }
         }
     }

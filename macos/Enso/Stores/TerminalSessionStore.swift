@@ -417,6 +417,10 @@ final class TerminalSessionStore: ObservableObject {
         for id in sessionIDs {
             GhosttySurfaceManager.shared.closeSurface(for: id)
         }
+        if persistToDisk {
+            // A closed tab can never resume its agent conversation.
+            AgentSessionStore.shared.removeRecords(forTabs: sessionIDs)
+        }
         _ = removeSessions(with: sessionIDs)
         multiSelection.subtract(sessionIDs)
 
@@ -724,7 +728,10 @@ final class TerminalSessionStore: ObservableObject {
 
     private static var stateURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let base = appSupport.appendingPathComponent("Enso", isDirectory: true)
+        // Per-build-identity folder (debug builds get "Enso Nightly") so a
+        // nightly running alongside the installed Enso can't clobber its
+        // state.json — two live writers is last-writer-wins data loss.
+        let base = EnsoAppSupport.directory
 
         // One-time migration from a prior app identity, most recent first:
         // "Bloom" was the name before the Enso rename; "cmux-alternative"

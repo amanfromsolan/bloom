@@ -27,6 +27,29 @@ final class GhosttyRuntime {
     func ensureStarted() {
         guard app == nil else { return }
 
+        // libghostty resolves its resources dir from GHOSTTY_RESOURCES_DIR
+        // before falling back to bundle detection — and when Enso is launched
+        // from inside another Ghostty-based terminal (including Enso itself),
+        // that inherited var points at the OTHER app's bundle, so tabs source
+        // a foreign shell integration. Pin it to our own bundle, the same way
+        // Ghostty.app does.
+        if let resources = Bundle.main.resourceURL?.appendingPathComponent("ghostty", isDirectory: true),
+           FileManager.default.fileExists(atPath: resources.path) {
+            setenv("GHOSTTY_RESOURCES_DIR", resources.path, 1)
+        }
+
+        // Launching Enso from inside an agent session (Claude Code's shell,
+        // an Enso tab, codex) leaks that session's identity into every tab we
+        // spawn — the agent shims would then treat the user's own launches as
+        // nested runs and stay inert. Our tabs are fresh sessions, never
+        // nested inside whatever started the app.
+        for inherited in [
+            "CLAUDECODE", "CODEX_SANDBOX", "ENSO_AGENT_ACTIVE",
+            "ENSO_TAB_ID", "ENSO_SHIM_DIR", "ENSO_SESSIONS_DIR", "ENSO_SHIM_DEPTH",
+        ] {
+            unsetenv(inherited)
+        }
+
         guard ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == GHOSTTY_SUCCESS else {
             NSLog("GhosttyRuntime: ghostty_init failed")
             return

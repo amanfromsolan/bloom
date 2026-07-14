@@ -23,6 +23,11 @@
 		A10000312FD810C30001BF12 /* GhosttySurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000342FD810C30001BF12 /* GhosttySurfaceView.swift */; };
 		A10000322FD810C30001BF12 /* GhosttySurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000352FD810C30001BF12 /* GhosttySurfaceManager.swift */; };
 		A10000362FD810C30001BF12 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000372FD810C30001BF12 /* GhosttyKit.xcframework */; };
+		A1AGADP0012FD810C30001BF12 /* AgentSessionAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGADP0022FD810C30001BF12 /* AgentSessionAdapter.swift */; };
+		A1AGSAN0012FD810C30001BF12 /* AgentLaunchSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGSAN0022FD810C30001BF12 /* AgentLaunchSanitizer.swift */; };
+		A1AGSTR0012FD810C30001BF12 /* AgentSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGSTR0022FD810C30001BF12 /* AgentSessionStore.swift */; };
+		A1AGSHM0012FD810C30001BF12 /* AgentShimInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGSHM0022FD810C30001BF12 /* AgentShimInstaller.swift */; };
+		A1AGRES0012FD810C30001BF12 /* agent-shims in Resources */ = {isa = PBXBuildFile; fileRef = A1AGRES0022FD810C30001BF12 /* agent-shims */; };
 		A1AUTONM012FD810C30001BF12 /* TabAutoNamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AUTONM022FD810C30001BF12 /* TabAutoNamer.swift */; };
 		A1CMDCTR012FD810C30001BF12 /* CommandCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1CMDCTR022FD810C30001BF12 /* CommandCenter.swift */; };
 		A1GRES0012FD810C30001BF12 /* terminfo in Resources */ = {isa = PBXBuildFile; fileRef = A1GRES0022FD810C30001BF12 /* terminfo */; };
@@ -78,6 +83,11 @@
 		A10000342FD810C30001BF12 /* GhosttySurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttySurfaceView.swift; sourceTree = "<group>"; };
 		A10000352FD810C30001BF12 /* GhosttySurfaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttySurfaceManager.swift; sourceTree = "<group>"; };
 		A10000372FD810C30001BF12 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
+		A1AGADP0022FD810C30001BF12 /* AgentSessionAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionAdapter.swift; sourceTree = "<group>"; };
+		A1AGSAN0022FD810C30001BF12 /* AgentLaunchSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLaunchSanitizer.swift; sourceTree = "<group>"; };
+		A1AGSTR0022FD810C30001BF12 /* AgentSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionStore.swift; sourceTree = "<group>"; };
+		A1AGSHM0022FD810C30001BF12 /* AgentShimInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentShimInstaller.swift; sourceTree = "<group>"; };
+		A1AGRES0022FD810C30001BF12 /* agent-shims */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "agent-shims"; path = "Resources/agent-shims"; sourceTree = "<group>"; };
 		A1AUTONM022FD810C30001BF12 /* TabAutoNamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabAutoNamer.swift; sourceTree = "<group>"; };
 		A1CMDCTR022FD810C30001BF12 /* CommandCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCenter.swift; sourceTree = "<group>"; };
 		A1GRES0022FD810C30001BF12 /* terminfo */ = {isa = PBXFileReference; lastKnownFileType = folder; name = terminfo; path = Resources/terminfo; sourceTree = "<group>"; };
@@ -169,6 +179,7 @@
 				A100000D2FD810C30001BF12 /* Assets.xcassets */,
 				A1GRES0022FD810C30001BF12 /* terminfo */,
 				A1GRES0042FD810C30001BF12 /* ghostty */,
+				A1AGRES0022FD810C30001BF12 /* agent-shims */,
 				A1PICKSF022FD810C30001BF12 /* sf-symbols.json */,
 				A1PICKEM022FD810C30001BF12 /* emoji.json */,
 				A100000B2FD810C30001BF12 /* ContentView.swift */,
@@ -207,6 +218,10 @@
 		A10000222FD810C30001BF12 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A1AGSAN0022FD810C30001BF12 /* AgentLaunchSanitizer.swift */,
+				A1AGADP0022FD810C30001BF12 /* AgentSessionAdapter.swift */,
+				A1AGSTR0022FD810C30001BF12 /* AgentSessionStore.swift */,
+				A1AGSHM0022FD810C30001BF12 /* AgentShimInstaller.swift */,
 				A10000032FD810C30001BF12 /* GhosttyTerminalHostView.swift */,
 				A1TABSW022FD810C30001BF12 /* TabSwitcher.swift */,
 				A1AUTONM022FD810C30001BF12 /* TabAutoNamer.swift */,
@@ -373,6 +388,7 @@
 				A100000E2FD810C30001BF12 /* Assets.xcassets in Resources */,
 				A1GRES0012FD810C30001BF12 /* terminfo in Resources */,
 				A1GRES0032FD810C30001BF12 /* ghostty in Resources */,
+				A1AGRES0012FD810C30001BF12 /* agent-shims in Resources */,
 				A1PICKSF012FD810C30001BF12 /* sf-symbols.json in Resources */,
 				A1PICKEM012FD810C30001BF12 /* emoji.json in Resources */,
 			);
@@ -408,6 +424,10 @@
 				A1TABPRC012FD810C30001BF12 /* TabProcess.swift in Sources */,
 				A1ICNCAT012FD810C30001BF12 /* IconCatalog.swift in Sources */,
 				A10000122FD810C30001BF12 /* GhosttyTerminalHostView.swift in Sources */,
+				A1AGSAN0012FD810C30001BF12 /* AgentLaunchSanitizer.swift in Sources */,
+				A1AGADP0012FD810C30001BF12 /* AgentSessionAdapter.swift in Sources */,
+				A1AGSTR0012FD810C30001BF12 /* AgentSessionStore.swift in Sources */,
+				A1AGSHM0012FD810C30001BF12 /* AgentShimInstaller.swift in Sources */,
 				A1TABSW012FD810C30001BF12 /* TabSwitcher.swift in Sources */,
 				A1AUTONM012FD810C30001BF12 /* TabAutoNamer.swift in Sources */,
 				A1CMDCTR012FD810C30001BF12 /* CommandCenter.swift in Sources */,
@@ -686,7 +706,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Enso.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Enso";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Enso Nightly.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Enso Nightly";
 			};
 			name = Debug;
 		};

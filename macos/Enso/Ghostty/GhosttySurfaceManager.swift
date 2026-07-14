@@ -14,7 +14,19 @@ final class GhosttySurfaceManager {
         if let existing = views[session.id] {
             return existing
         }
-        let view = GhosttySurfaceView(workingDirectory: session.workingDirectory)
+        // Agent-session persistence: every surface gets the shim env (so
+        // claude/codex launches are recorded), and a tab whose agent was
+        // running at quit types its restore command — a conversation resume
+        // or a fresh relaunch — into the fresh PTY.
+        let agentStore = AgentSessionStore.shared
+        let restore = agentStore.consumeRestore(forTab: session.id)
+        let view = GhosttySurfaceView(
+            workingDirectory: session.workingDirectory,
+            environmentVariables: agentStore.spawnEnvironment(forTab: session.id),
+            initialInput: restore.map {
+                agentStore.resumeInput(for: $0, currentWorkingDirectory: session.workingDirectory)
+            }
+        )
         views[session.id] = view
         return view
     }

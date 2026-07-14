@@ -95,12 +95,29 @@ final class QuitGuard {
         GhosttySurfaceManager.shared.restoreFocus(to: store.selection)
         return false
     }
+
+    /// Records which tabs were running an agent at quit. Written on every
+    /// path that actually terminates — including the no-sessions and
+    /// no-window ones — because the snapshot's *presence* is what tells the
+    /// next launch "clean quit" apart from "crash" (an empty tab map is
+    /// itself meaningful: nothing agent-related was running).
+    func writeQuitSnapshot() {
+        let agentsByTab = (store?.sessions ?? []).reduce(into: [UUID: String]()) { result, session in
+            guard let process = session.runningProcess,
+                  AgentSessionAdapterRegistry.all.contains(where: { $0.agentID == process.rawValue })
+            else { return }
+            result[session.id] = process.rawValue
+        }
+        AgentSessionStore.shared.writeQuitSnapshot(agentsByTab: agentsByTab)
+    }
 }
 
 /// AppKit lifecycle hook for EnsoApp; SwiftUI has no native quit intercept.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        QuitGuard.shared.consentsToTerminate() ? .terminateNow : .terminateCancel
+        guard QuitGuard.shared.consentsToTerminate() else { return .terminateCancel }
+        QuitGuard.shared.writeQuitSnapshot()
+        return .terminateNow
     }
 }

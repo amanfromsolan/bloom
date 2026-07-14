@@ -456,3 +456,24 @@ _ghostty_deferred_init() {
 }
 
 _entrypoint
+
+# --- Enso agent-session shims (keep block minimal for upstream merges) ---
+# macOS /etc/zprofile runs path_helper, which demotes the shim dir Enso
+# prepends at spawn (and user dotfiles may clobber PATH entirely). A
+# one-shot precmd hook re-prepends it after every startup file has run,
+# then deregisters itself.
+if [[ -n "${ENSO_SHIM_DIR:-}" && -d "${ENSO_SHIM_DIR}" ]]; then
+    _enso_fix_path() {
+        local p="" d
+        for d in ${(s.:.)PATH}; do
+            [[ "$d" == "$ENSO_SHIM_DIR" ]] && continue
+            p="${p:+$p:}$d"
+        done
+        export PATH="$ENSO_SHIM_DIR:$p"
+        builtin hash -r 2>/dev/null
+        add-zsh-hook -d precmd _enso_fix_path
+    }
+    builtin autoload -Uz add-zsh-hook 2>/dev/null
+    add-zsh-hook precmd _enso_fix_path 2>/dev/null
+fi
+# --- end Enso block ---
