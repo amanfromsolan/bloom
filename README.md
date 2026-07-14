@@ -17,6 +17,8 @@ Enso is a fast, keyboard-first terminal for people who run a lot of tabs — esp
 
 **[⬇ Download Enso.dmg](https://github.com/amanfromsolan/enso/releases/latest)** — signed & notarized, no security prompts. Drag to Applications, open, done.
 
+> ⚠️ Enso is pre-1.0 — expect breaking changes between releases.
+
 ## Highlights
 
 - **🪷 Spaces** — swipeable sidebar workspaces with their own tabs, folders, and pinned sessions. Overswipe past the last space to create a new one.
