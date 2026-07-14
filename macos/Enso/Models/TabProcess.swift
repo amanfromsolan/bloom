@@ -23,13 +23,16 @@ enum TabProcess: String, Hashable {
     enum Badge {
         /// Asset-catalog template image with its brand color.
         case asset(String, Color)
+        /// Full-color asset-catalog artwork, rendered as-is (no tint).
+        case artwork(String)
         /// SF Symbol, tinted with the tab's accent by the row.
         case symbol(String)
     }
 
     var badge: Badge {
         switch self {
-        case .claude: .asset("AgentClaude", Color(hex: 0xD97757))
+        // Multicolor pixel-art mark; drawn untinted at its native 14 px grid.
+        case .claude: .artwork("AgentClaude")
         // Codex and Ollama ship monochrome marks; ink keeps them legible on
         // both the dark and the light sidebar (white there would vanish).
         case .codex: .asset("AgentCodex", Theme.ink.opacity(0.85))

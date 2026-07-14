@@ -1293,6 +1293,16 @@ private struct ProcessBadgeView: View {
                 .aspectRatio(contentMode: .fit)
                 .foregroundStyle(brand.opacity(isSelected ? 1 : 0.8))
                 .frame(width: 12, height: 12)
+        case .artwork(let name):
+            // Full-color mark drawn as-is. 14 pt matches the artwork's
+            // 14 px grid (and the row's badge slot) so pixel edges land
+            // on whole pixels instead of blurring at 12 pt.
+            Image(name)
+                .resizable()
+                .renderingMode(.original)
+                .aspectRatio(contentMode: .fit)
+                .opacity(isSelected ? 1 : 0.8)
+                .frame(width: 14, height: 14)
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: 10, weight: .medium))
