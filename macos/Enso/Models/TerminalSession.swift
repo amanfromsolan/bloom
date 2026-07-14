@@ -45,15 +45,22 @@ struct TerminalFolder: Identifiable, Hashable, Codable {
     let id: UUID
     var title: String
     var sessions: [TerminalSession]
+    /// Last-known cwd of the folder's most recently active tab. A folder is,
+    /// in practice, a project: this keeps the association alive after the
+    /// last tab is gone so a new tab can start back in the project directory.
+    /// Optional, so state files written before this field decode as nil.
+    var lastWorkingDirectory: String?
 
     init(
         id: UUID = UUID(),
         title: String,
-        sessions: [TerminalSession] = []
+        sessions: [TerminalSession] = [],
+        lastWorkingDirectory: String? = nil
     ) {
         self.id = id
         self.title = title
         self.sessions = sessions
+        self.lastWorkingDirectory = lastWorkingDirectory
     }
 }
 

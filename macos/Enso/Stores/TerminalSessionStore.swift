@@ -269,7 +269,10 @@ final class TerminalSessionStore: ObservableObject {
     /// New terminal inside a folder. Continues in the given working
     /// directory when one is passed (⌘N inheriting the active tab's cwd);
     /// otherwise in the working directory of the folder's most recently
-    /// active tab (home for an empty folder).
+    /// active tab. An empty folder falls back to the directory remembered
+    /// from its last departed tab (see `rememberWorkingDirectory`), and
+    /// only then to home — a folder is a project, and losing every tab
+    /// shouldn't lose the project.
     func createSession(inFolder folderID: TerminalFolder.ID, workingDirectory: String? = nil) {
         for spaceIndex in spaces.indices {
             guard let folderIndex = spaces[spaceIndex].pinnedFolders.firstIndex(where: { $0.id == folderID }) else {
@@ -278,6 +281,7 @@ final class TerminalSessionStore: ObservableObject {
             let folder = spaces[spaceIndex].pinnedFolders[folderIndex]
             let cwd = workingDirectory
                 ?? folder.sessions.max(by: { $0.lastActivity < $1.lastActivity })?.workingDirectory
+                ?? Self.existingDirectory(folder.lastWorkingDirectory)
             let session = Self.makeSession(workingDirectory: cwd, accentIndex: sessions.count)
             spaces[spaceIndex].pinnedFolders[folderIndex].sessions.append(session)
             if spaces[spaceIndex].id != activeSpaceID {
@@ -408,7 +412,16 @@ final class TerminalSessionStore: ObservableObject {
             spaces[index].pinnedSessions.removeAll { sessionIDs.contains($0.id) }
 
             for folderIndex in spaces[index].pinnedFolders.indices {
-                moved += spaces[index].pinnedFolders[folderIndex].sessions.filter { sessionIDs.contains($0.id) }
+                let folderSessions = spaces[index].pinnedFolders[folderIndex].sessions
+                let leaving = folderSessions.filter { sessionIDs.contains($0.id) }
+                guard !leaving.isEmpty else { continue }
+                // A folder losing tabs remembers its most recently active
+                // tab's cwd, so even the last tab leaving (close, expiry,
+                // move-out) keeps the folder's project directory.
+                if let lastActive = folderSessions.max(by: { $0.lastActivity < $1.lastActivity }) {
+                    spaces[index].pinnedFolders[folderIndex].lastWorkingDirectory = lastActive.workingDirectory
+                }
+                moved += leaving
                 spaces[index].pinnedFolders[folderIndex].sessions.removeAll { sessionIDs.contains($0.id) }
             }
 
@@ -598,7 +611,33 @@ final class TerminalSessionStore: ObservableObject {
             guard item.workingDirectory != path else { return }
             item.workingDirectory = path
         }
+        rememberWorkingDirectory(path, forFolderContaining: sessionID)
         save()
+    }
+
+    /// Writes the folder's remembered directory on every member cwd change,
+    /// so it always tracks the live cwd of the tab that most recently moved —
+    /// captured continuously rather than only on tab removal, which would
+    /// lose the value if the app quits uncleanly.
+    private func rememberWorkingDirectory(_ path: String, forFolderContaining sessionID: TerminalSession.ID) {
+        for spaceIndex in spaces.indices {
+            for folderIndex in spaces[spaceIndex].pinnedFolders.indices
+            where spaces[spaceIndex].pinnedFolders[folderIndex].sessions.contains(where: { $0.id == sessionID }) {
+                spaces[spaceIndex].pinnedFolders[folderIndex].lastWorkingDirectory = path
+                return
+            }
+        }
+    }
+
+    /// A remembered directory is only worth spawning into while it still
+    /// exists; stale paths fall back to the default instead of failing.
+    private static func existingDirectory(_ path: String?) -> String? {
+        guard let path, !path.isEmpty else { return nil }
+        let expanded = (path as NSString).expandingTildeInPath
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return nil }
+        return path
     }
 
     func markSelectedNeedsAttention() {
