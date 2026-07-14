@@ -652,6 +652,12 @@ private struct SpacePage: View {
         // inside it (highlight).
         let isFolderDragOver = isDropTarget && draggedFolderID != nil
         let isSessionDragOver = isDropTarget && draggedFolderID == nil
+        // A collapsed folder still shows its active tab: the selected row
+        // peeks out under the folder so the current tab never vanishes from
+        // the sidebar. Selecting a tab elsewhere retracts it.
+        let peekingSession = isExpanded
+            ? nil
+            : folder.sessions.first { $0.id == store.selection }
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
@@ -790,8 +796,11 @@ private struct SpacePage: View {
 
             // Children live in a container that collapses to zero height and
             // clips, so rows disappear into the folder instead of floating.
+            // The peeking session is pulled out (it renders below instead),
+            // so its row — and a rename field's focus binding — never exists
+            // twice in the tree.
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(folder.sessions) { session in
+                ForEach(folder.sessions.filter { $0.id != peekingSession?.id }) { session in
                     sessionRow(session)
                 }
             }
@@ -805,6 +814,15 @@ private struct SpacePage: View {
             .clipped()
             .allowsHitTesting(isExpanded)
             .opacity(isExpanded ? 1 : 0)
+
+            // The active tab peeking out of a collapsed folder: the ordinary
+            // session row at child indentation, fully interactive.
+            if let peekingSession {
+                sessionRow(peekingSession)
+                    .padding(.leading, 14)
+                    .padding(.trailing, 6)
+                    .padding(.bottom, 5)
+            }
 
             // The gap after a folder is its landing strip: a dragged tab
             // becomes the folder's last item (short line at child depth),
@@ -1161,8 +1179,15 @@ private struct SpacePage: View {
 
     private func visibleOrder() -> [TerminalSession.ID] {
         var order = space.pinnedSessions.map(\.id)
-        for folder in space.pinnedFolders where !store.collapsedFolderIDs.contains(folder.id) {
-            order += folder.sessions.map(\.id)
+        for folder in space.pinnedFolders {
+            if !store.collapsedFolderIDs.contains(folder.id) {
+                order += folder.sessions.map(\.id)
+            } else if let selection = store.selection,
+                      folder.sessions.contains(where: { $0.id == selection }) {
+                // The active tab peeks out of its collapsed folder, so it
+                // participates in shift-click ranges like any visible row.
+                order.append(selection)
+            }
         }
         order += space.ephemeralSessions.map(\.id)
         return order
