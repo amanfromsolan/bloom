@@ -10,8 +10,6 @@ struct TerminalHeaderView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Spacer(minLength: 0)
-
             HStack(spacing: 8) {
                 // Leading slot mirrors the sidebar row: the detected-process
                 // badge supplants the accent dot while something known is
@@ -20,13 +18,13 @@ struct TerminalHeaderView: View {
                     HeaderProcessBadge(process: process, ink: terminalInk)
                 } else {
                     Circle()
-                        .fill(session.accent.color.opacity(0.8))
+                        .fill(terminalInk.opacity(0.5))
                         .frame(width: 6, height: 6)
                 }
 
                 Text(session.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(terminalInk.opacity(0.9))
                     .lineLimit(1)
 
                 breadcrumb
@@ -38,11 +36,11 @@ struct TerminalHeaderView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .frame(height: 34)
+        .padding(.horizontal, 16)
+        .frame(height: 46)
         .frame(maxWidth: .infinity)
         #if DEBUG
-        // Overlaid so the badge never pushes the centered title off-axis.
+        // Overlaid so the badge claims no room from the title cluster.
         .overlay(alignment: .trailing) {
             DevBadge()
                 .frame(height: 22)
@@ -74,22 +72,22 @@ struct TerminalHeaderView: View {
         return HStack(spacing: 4) {
             Image(systemName: trail.rootIcon)
                 .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(trail.segments.isEmpty ? 0.42 : 0.3))
+                .foregroundStyle(terminalInk.opacity(trail.segments.isEmpty ? 0.42 : 0.3))
 
             if let rootLabel = trail.rootLabel {
                 Text(rootLabel)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.42))
+                    .foregroundStyle(terminalInk.opacity(0.42))
             }
 
             ForEach(Array(trail.segments.enumerated()), id: \.offset) { index, segment in
                 Image(systemName: "chevron.compact.right")
                     .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.18))
+                    .foregroundStyle(terminalInk.opacity(0.18))
 
                 Text(segment)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(
+                    .foregroundStyle(terminalInk.opacity(
                         index == trail.segments.count - 1 ? 0.42 : 0.28
                     ))
                     .lineLimit(1)
@@ -99,40 +97,46 @@ struct TerminalHeaderView: View {
 }
 
 /// Detected-process icon in the header's leading slot — the header twin of
-/// the sidebar's ProcessBadgeView, but tinted for the terminal background:
-/// brand colors and tab accents are tuned for the app chrome, so everything
-/// here renders in the luminance-derived ink at a subdued opacity to stay
-/// legible and quiet on any Ghostty theme.
-///
-/// Integration note: when TabProcess.Badge grows a full-color
-/// `.artwork(name)` case, add it to this switch rendering the image with no
-/// template tinting (full color on light and dark alike) and opacity-only
-/// dimming, e.g. `Image(name).resizable().aspectRatio(contentMode: .fit)
-/// .opacity(0.85).frame(width: 14, height: 14)`.
+/// the sidebar's ProcessBadgeView. Agents get their full-color mark (24 pt,
+/// drawn from the 48-grid artwork); tool symbols render in the luminance-
+/// derived ink at a subdued opacity to stay legible and quiet on any
+/// Ghostty theme.
 private struct HeaderProcessBadge: View {
     let process: TabProcess
     let ink: Color
 
     var body: some View {
         switch process.badge {
-        case .artwork(let name):
-            Image(name)
+        case .agent(let base):
+            // The header sits on the Ghostty theme background, not the app
+            // chrome, so the artwork's light/dark appearance variant must
+            // key off that color's luminance rather than the system
+            // appearance. Overriding the environment colorScheme makes the
+            // asset catalog resolve the matching variant.
+            // 24 pt draws the 48-grid artwork: 24 pt @2x is 48 physical
+            // pixels, so the marks land 1:1 on the Retina grid.
+            Image("\(base)48")
                 .resizable()
+                .renderingMode(.original)
                 .aspectRatio(contentMode: .fit)
-                .opacity(0.85)
-                .frame(width: 14, height: 14)
-        case .asset(let name, _):
-            Image(name)
-                .resizable()
-                .renderingMode(.template)
-                .aspectRatio(contentMode: .fit)
-                .foregroundStyle(ink.opacity(0.6))
-                .frame(width: 12, height: 12)
+                .frame(width: 24, height: 24)
+                .environment(\.colorScheme, terminalColorScheme)
         case .symbol(let name):
             Image(systemName: name)
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(ink.opacity(0.6))
+        case .dot:
+            // A live process without artwork: the idle dot turns blue.
+            Circle()
+                .fill(Color.blue.opacity(0.8))
+                .frame(width: 6, height: 6)
         }
+    }
+
+    /// Light terminal theme -> light-appearance artwork; dark -> dark. Same
+    /// luminance threshold as the header's ink.
+    private var terminalColorScheme: ColorScheme {
+        GhosttyRuntime.shared.themeBackground.relativeLuminance > 0.179 ? .light : .dark
     }
 }
 

@@ -20,9 +20,17 @@ final class GhosttySurfaceManager {
         // or a fresh relaunch — into the fresh PTY.
         let agentStore = AgentSessionStore.shared
         let restore = agentStore.consumeRestore(forTab: session.id)
+        // ENSO_TAB_ID is the tab's core identity marker and is injected on
+        // EVERY surface, unconditionally — agent-session persistence gates
+        // on ENSO_SESSIONS_DIR (via spawnEnvironment), never on this.
+        // ForegroundProcessResolver needs the marker to find this tab's
+        // shell among the app's descendants (libghostty never exposes the
+        // shell pid).
+        var environment = agentStore.spawnEnvironment(forTab: session.id)
+        environment[ForegroundProcessResolver.sessionMarkerKey] = ForegroundProcessResolver.marker(forTab: session.id)
         let view = GhosttySurfaceView(
             workingDirectory: session.workingDirectory,
-            environmentVariables: agentStore.spawnEnvironment(forTab: session.id),
+            environmentVariables: environment,
             initialInput: restore.map {
                 agentStore.resumeInput(for: $0, currentWorkingDirectory: session.workingDirectory)
             }

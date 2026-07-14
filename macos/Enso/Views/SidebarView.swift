@@ -917,25 +917,19 @@ private struct SpacePage: View {
                 // behind the spinner read as the icon skipping that command.
                 Group {
                     if let process = session.runningProcess {
-                        ProcessBadgeView(
-                            process: process,
-                            accent: session.accent.color,
-                            isSelected: isSelected
-                        )
+                        ProcessBadgeView(process: process, isSelected: isSelected)
                     } else if namer.namingSessions.contains(session.id) {
                         AutoNamingIndicator()
                             .frame(width: 8, height: 8)
                     } else {
                         Circle()
-                            // The 0.55 wash reads right on dark; on the
-                            // light sidebar it fades out, so stay denser.
-                            .fill(session.accent.color.opacity(
-                                isSelected ? 0.95 : (colorScheme == .light ? 0.85 : 0.55)
-                            ))
+                            // Idle dot in the folder grey — Theme.ink
+                            // already adapts to the light/dark sidebar.
+                            .fill(Theme.ink.opacity(isSelected ? 0.85 : 0.6))
                             .frame(width: 8, height: 8)
                     }
                 }
-                .frame(width: 14, height: 14)
+                .frame(width: 16, height: 16)
 
                 if isRenaming {
                     TextField("", text: $draftTitle)
@@ -1277,36 +1271,40 @@ private struct FolderFoldToggle: View {
     }
 }
 
-/// Detected-process icon in the tab row's leading slot: brand logo for
-/// agents (in brand color), SF Symbol for known tools (in the tab accent).
+/// Detected-process icon in the tab row's leading slot: adaptive artwork
+/// for agents (full color, dimmed when inactive), SF Symbol in neutral
+/// ink for known tools, the running-blue dot for anything else alive.
 private struct ProcessBadgeView: View {
     let process: TabProcess
-    let accent: Color
     let isSelected: Bool
 
     var body: some View {
         switch process.badge {
-        case .asset(let name, let brand):
-            Image(name)
-                .resizable()
-                .renderingMode(.template)
-                .aspectRatio(contentMode: .fit)
-                .foregroundStyle(brand.opacity(isSelected ? 1 : 0.8))
-                .frame(width: 12, height: 12)
-        case .artwork(let name):
-            // Full-color mark drawn as-is. 14 pt matches the artwork's
-            // 14 px grid (and the row's badge slot) so pixel edges land
-            // on whole pixels instead of blurring at 12 pt.
-            Image(name)
+        case .agent(let base):
+            // 16 pt matches the artwork's 16 px pixel grid (and the row's
+            // badge slot) so pixel edges land on whole pixels. Full-color
+            // mark on every tab — its light/dark appearance variants track
+            // the app theme via the asset catalog. (The "<base>16Tinted"
+            // template glyphs stay in the catalog as an alternative
+            // inactive treatment.)
+            Image("\(base)16")
                 .resizable()
                 .renderingMode(.original)
                 .aspectRatio(contentMode: .fit)
                 .opacity(isSelected ? 1 : 0.8)
-                .frame(width: 14, height: 14)
+                .frame(width: 16, height: 16)
         case .symbol(let name):
+            // Neutral ink like the folder glyphs — tool badges are status,
+            // not identity, so they don't take the tab accent (issue #43).
             Image(systemName: name)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(accent.opacity(isSelected ? 0.95 : 0.65))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.ink.opacity(isSelected ? 0.8 : 0.55))
+        case .dot:
+            // A live process without artwork: the idle dot turns blue so
+            // "something is running here" reads at a glance.
+            Circle()
+                .fill(Color.blue.opacity(isSelected ? 0.95 : 0.7))
+                .frame(width: 8, height: 8)
         }
     }
 }

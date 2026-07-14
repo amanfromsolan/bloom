@@ -563,7 +563,41 @@ final class TerminalSessionStore: ObservableObject {
             guard item.titleOrigin == .shell, item.title != display else { return }
             item.title = display
         }
+        scheduleForegroundProcessCheck(for: sessionID)
         save()
+    }
+
+    /// Delay before asking the pty what's actually running: long enough for
+    /// the command to exec (preexec titles arrive before the shell forks),
+    /// short enough that the badge still feels live.
+    private static let foregroundCheckDelay: TimeInterval = 0.5
+
+    /// Sessions with a foreground check already queued; coalesces bursts of
+    /// title events (agents retitle constantly) into one walk per window.
+    private var pendingForegroundChecks: Set<TerminalSession.ID> = []
+
+    /// Title-based detection can't see through shell aliases — preexec
+    /// reports the command *as typed*, so `alias c="claude"` never matches
+    /// the table. Shortly after each title event, re-run detection on the
+    /// pty's actual foreground process, which is alias-proof and also
+    /// catches agents launched from scripts.
+    private func scheduleForegroundProcessCheck(for sessionID: TerminalSession.ID) {
+        guard !pendingForegroundChecks.contains(sessionID) else { return }
+        pendingForegroundChecks.insert(sessionID)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.foregroundCheckDelay) { [weak self] in
+            guard let self else { return }
+            self.pendingForegroundChecks.remove(sessionID)
+            let resolution = ForegroundProcessResolver.shared
+                .resolveForeground(forSessionMarker: ForegroundProcessResolver.marker(forTab: sessionID))
+            // Compute first, publish only on change: update() mutates
+            // @Published state and re-renders the sidebar and header, so a
+            // no-op detection — the steady state for a long-running agent
+            // retitling every few seconds — must not touch it.
+            guard let session = self.sessions.first(where: { $0.id == sessionID }) else { return }
+            let detected = TabProcess.detect(after: session.runningProcess, foreground: resolution)
+            guard detected != session.runningProcess else { return }
+            self.update(sessionID) { $0.runningProcess = detected }
+        }
     }
 
     /// Shells commonly report the cwd as the title — sometimes pre-shortened

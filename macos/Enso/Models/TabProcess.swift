@@ -1,15 +1,16 @@
 import SwiftUI
 
 /// A recognized foreground process in a tab, detected from shell-integration
-/// title events. Agents get their bundled brand logo, known tools an SF
-/// Symbol glyph tinted with the tab accent; unknown or idle shells fall back
-/// to the accent dot.
+/// title events plus the pty's resolved foreground process. Agents get their
+/// brand artwork, known tools a neutral-ink SF Symbol; an unrecognized live
+/// process shows the running-blue dot, and idle shells the plain grey one.
 enum TabProcess: String, Hashable {
     // Agents with bundled brand icons.
     case claude
     case codex
     case gemini
     case ollama
+    case opencode
     // Tool families with symbol glyphs.
     case editor
     case remote
@@ -19,25 +20,29 @@ enum TabProcess: String, Hashable {
     case monitor
     case build
     case reader
+    // Something is in the foreground, but nothing we have artwork for —
+    // the resolver saw a live non-shell process that missed the table.
+    case unknown
 
-    enum Badge {
-        /// Asset-catalog template image with its brand color.
-        case asset(String, Color)
-        /// Full-color asset-catalog artwork, rendered as-is (no tint).
-        case artwork(String)
-        /// SF Symbol, tinted with the tab's accent by the row.
+    enum Badge: Equatable {
+        /// Adaptive agent artwork. Carries the asset-catalog base name;
+        /// views pick the concrete imageset — "<base>16" full-color with
+        /// light/dark appearance variants, "<base>16Tinted" single-color
+        /// template, "<base>48" for the larger header rendition.
+        case agent(String)
+        /// SF Symbol, rendered in neutral ink by the row.
         case symbol(String)
+        /// The plain dot, in its running-process (blue) treatment.
+        case dot
     }
 
     var badge: Badge {
         switch self {
-        // Multicolor pixel-art mark; drawn untinted at its native 14 px grid.
-        case .claude: .artwork("AgentClaude")
-        // Codex and Ollama ship monochrome marks; ink keeps them legible on
-        // both the dark and the light sidebar (white there would vanish).
-        case .codex: .asset("AgentCodex", Theme.ink.opacity(0.85))
-        case .gemini: .asset("AgentGemini", Color(hex: 0x8E75B2))
-        case .ollama: .asset("AgentOllama", Theme.ink.opacity(0.8))
+        case .claude: .agent("AgentClaude")
+        case .codex: .agent("AgentCodex")
+        case .gemini: .agent("AgentGemini")
+        case .ollama: .agent("AgentOllama")
+        case .opencode: .agent("AgentOpenCode")
         case .editor: .symbol("square.and.pencil")
         case .remote: .symbol("network")
         case .git: .symbol("arrow.triangle.branch")
@@ -46,6 +51,7 @@ enum TabProcess: String, Hashable {
         case .monitor: .symbol("speedometer")
         case .build: .symbol("hammer")
         case .reader: .symbol("doc.text")
+        case .unknown: .dot
         }
     }
 
@@ -54,6 +60,7 @@ enum TabProcess: String, Hashable {
         "codex": .codex,
         "gemini": .gemini,
         "ollama": .ollama,
+        "opencode": .opencode,
         "vim": .editor, "nvim": .editor, "vi": .editor, "nano": .editor,
         "hx": .editor, "emacs": .editor, "micro": .editor,
         "ssh": .remote, "mosh": .remote, "et": .remote,
@@ -68,8 +75,12 @@ enum TabProcess: String, Hashable {
         "less": .reader, "man": .reader, "bat": .reader, "tail": .reader,
     ]
 
+    /// Shell names that mean "idle prompt" in a *title* event. Only the
+    /// title path infers idleness from names; the foreground path gets an
+    /// explicit identity-based `.idle` signal from the resolver instead
+    /// (a wrapper script's bash would spoof a name check).
     private static let idleShells: Set<String> = [
-        "zsh", "bash", "fish", "sh", "nu", "login", "-zsh", "-bash",
+        "zsh", "bash", "fish", "sh", "dash", "ksh", "tcsh", "nu", "login",
     ]
 
     /// Next detected process given a new title event. Titles come in three
@@ -80,7 +91,7 @@ enum TabProcess: String, Hashable {
     /// is what survives an agent's own retitling while it is still running.
     static func detect(after current: TabProcess?, title: String) -> TabProcess? {
         guard let firstWord = title.split(separator: " ").first else { return current }
-        let command = (String(firstWord) as NSString).lastPathComponent.lowercased()
+        let command = normalized((String(firstWord) as NSString).lastPathComponent)
 
         if let match = commands[command] {
             return match
@@ -91,6 +102,41 @@ enum TabProcess: String, Hashable {
         return current
     }
 
+    /// Detection from the pty's resolved foreground — ground truth that
+    /// title events can't offer, since preexec reports commands as typed
+    /// and an alias like `c` never matches the table. The resolver decides
+    /// idle vs running by process identity, so `.idle` (shell back at the
+    /// prompt) and `.shellExited` (dead tab) both clear unconditionally.
+    /// While something is running, the first table hit among the best-first
+    /// candidates wins; a non-empty miss is authoritative — the foreground
+    /// really is some process we have no artwork for, so it shows the
+    /// `.unknown` running dot rather than keeping a stale table badge (the
+    /// stickiness foreign titles get does not apply here). An empty
+    /// candidate list carries no name evidence and keeps the current
+    /// detection, as does `.unresolved`.
+    static func detect(after current: TabProcess?, foreground resolution: ForegroundResolution) -> TabProcess? {
+        switch resolution {
+        case .unresolved:
+            return current
+        case .idle, .shellExited:
+            return nil
+        case .running(let candidates):
+            for candidate in candidates {
+                if let match = commands[normalized(candidate)] {
+                    return match
+                }
+            }
+            return candidates.isEmpty ? current : .unknown
+        }
+    }
+
+    /// Login shells rewrite argv[0] with a leading dash ("-fish"); strip it
+    /// before any table or idle-shell lookup.
+    private static func normalized(_ name: String) -> String {
+        let lowered = name.lowercased()
+        return lowered.hasPrefix("-") ? String(lowered.dropFirst()) : lowered
+    }
+
     /// Shell-integration prompts report the cwd as the title, in every
     /// shape the shell prints it: "~", "~/a/b", "/x/y", or ghostty's
     /// "…/a/b/c" shortening for deep paths. A path-shaped title that didn't
@@ -98,16 +144,5 @@ enum TabProcess: String, Hashable {
     /// this is what clears the badge when an agent or tool exits.
     private static func isPathShaped(_ word: Substring) -> Bool {
         word.hasPrefix("~") || word.hasPrefix("/") || word.hasPrefix("…")
-    }
-}
-
-extension Color {
-    init(hex: UInt32) {
-        self.init(
-            .sRGB,
-            red: Double((hex >> 16) & 0xFF) / 255,
-            green: Double((hex >> 8) & 0xFF) / 255,
-            blue: Double(hex & 0xFF) / 255
-        )
     }
 }

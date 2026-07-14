@@ -21,8 +21,11 @@ final class AgentSessionStore {
     /// Restore is offered at most once per tab per app run.
     private var consumedTabIDs: Set<UUID> = []
 
-    /// The Settings gate: off → no env injection on new surfaces (wrappers
-    /// pass through inertly without ENSO_TAB_ID) and no restore at launch.
+    /// The Settings gate: off → no shim environment on new surfaces —
+    /// ENSO_SESSIONS_DIR is what the wrappers key their recording on, so
+    /// without it they pass through inertly — and no restore at launch.
+    /// ENSO_TAB_ID is NOT gated here: it is the always-on tab-identity
+    /// marker GhosttySurfaceManager injects on every surface regardless.
     var isEnabled: Bool {
         defaults.object(forKey: Self.restoreEnabledDefaultsKey) as? Bool ?? true
     }
@@ -95,7 +98,7 @@ final class AgentSessionStore {
         let shimDir = AgentShimInstaller.shimBinDirectory.path
         let inheritedPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         return [
-            "ENSO_TAB_ID": tabID.uuidString.lowercased(),
+            ForegroundProcessResolver.sessionMarkerKey: ForegroundProcessResolver.marker(forTab: tabID),
             "ENSO_SHIM_DIR": shimDir,
             "ENSO_SESSIONS_DIR": directory.path,
             "PATH": "\(shimDir):\(inheritedPath)",
