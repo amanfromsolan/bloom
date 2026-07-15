@@ -344,9 +344,17 @@ final class CommandCenter: ObservableObject {
         store: TerminalSessionStore
     ) -> PaletteItem {
         let folder = Self.folder(of: session.id, in: space)
+        // Resolved at build time, like the title: a tab running a detected
+        // process shows its badge, an idle one the terminal glyph — the
+        // same pairing the sidebar rows use.
+        let icon: PaletteItem.Icon = if let process = session.runningProcess {
+            .process(process)
+        } else {
+            .idleTerminal
+        }
         return PaletteItem(
             id: "tab-\(session.id)",
-            icon: .accent(session.accent.color),
+            icon: icon,
             title: session.title,
             context: folder?.title,
             contextSymbol: folder == nil ? nil : "folder",
@@ -759,6 +767,11 @@ struct PaletteItem: Identifiable {
         case accent(Color)
         case space(SidebarSpace.Icon)
         case symbol(String)
+        /// Detected foreground process on a tab row; renders its badge in
+        /// place of the accent dot.
+        case process(TabProcess)
+        /// Idle tab: the terminal glyph, tinted like the row's other marks.
+        case idleTerminal
     }
 
     /// Drives the grouped section headers in the palette.
@@ -928,10 +941,16 @@ struct CommandCenterView: View {
                         .tracking(PaletteFont.tracking)
                         .foregroundStyle(Theme.text(isHighlighted ? 0.5 : 0.38))
                         .lineLimit(1)
-                    if let symbol = item.contextSymbol {
-                        Image(systemName: symbol)
-                            .font(.system(size: 12, weight: .regular))
+                    if item.contextSymbol != nil {
+                        // The only context symbol today is the folder hint;
+                        // drawn with the custom glyph so it matches the
+                        // sidebar's folder rows.
+                        Image("FolderClosed16")
+                            .resizable()
+                            .renderingMode(.template)
+                            .aspectRatio(contentMode: .fit)
                             .foregroundStyle(Theme.text(isHighlighted ? 0.45 : 0.34))
+                            .frame(width: 13, height: 13)
                     }
                 }
             }
@@ -960,9 +979,18 @@ struct CommandCenterView: View {
             Circle()
                 .fill(color.opacity(isHighlighted ? 1 : 0.9))
                 .frame(width: 9, height: 9)
+        case .process(let process):
+            RowProcessBadge(process: process, isHighlighted: isHighlighted)
+        case .idleTerminal:
+            Image("TerminalIdle16")
+                .resizable()
+                .renderingMode(.template)
+                .aspectRatio(contentMode: .fit)
+                .foregroundStyle(Theme.ink.opacity(isHighlighted ? 0.9 : 0.4))
+                .frame(width: 22, height: 22)
         case .symbol(let name):
             Image(systemName: name)
-                .font(.system(size: 16, weight: .regular))
+                .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(Theme.text(isHighlighted ? 0.9 : 0.7))
         case .space(let spaceIcon):
             switch spaceIcon {
@@ -972,7 +1000,7 @@ struct CommandCenterView: View {
                     .frame(width: 9, height: 9)
             case .symbol(let name):
                 Image(systemName: name)
-                    .font(.system(size: 16, weight: .regular))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(Theme.text(isHighlighted ? 0.9 : 0.7))
             case .emoji(let emoji):
                 Text(emoji)

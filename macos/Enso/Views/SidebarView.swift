@@ -661,8 +661,11 @@ private struct SpacePage: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                FolderGlyph(isOpen: isExpanded)
-                    .fill(Theme.ink.opacity(0.6), style: FillStyle(eoFill: true))
+                Image(isExpanded ? "FolderOpen16" : "FolderClosed16")
+                    .resizable()
+                    .renderingMode(.template)
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(Theme.ink.opacity(0.6))
                     .frame(width: 16, height: 16)
                     .frame(width: 16)
 
@@ -922,11 +925,15 @@ private struct SpacePage: View {
                         AutoNamingIndicator()
                             .frame(width: 8, height: 8)
                     } else {
-                        Circle()
-                            // Idle dot in the folder grey — Theme.ink
-                            // already adapts to the light/dark sidebar.
-                            .fill(Theme.ink.opacity(isSelected ? 0.85 : 0.6))
-                            .frame(width: 8, height: 8)
+                        // Idle terminal glyph in the folder grey — a
+                        // template, so Theme.ink adapts it to the light/
+                        // dark sidebar. Unselected rows stay whisper-quiet.
+                        Image("TerminalIdle16")
+                            .resizable()
+                            .renderingMode(.template)
+                            .aspectRatio(contentMode: .fit)
+                            .foregroundStyle(Theme.ink.opacity(isSelected ? 0.85 : 0.4))
+                            .frame(width: 16, height: 16)
                     }
                 }
                 .frame(width: 16, height: 16)
@@ -1300,11 +1307,15 @@ private struct ProcessBadgeView: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Theme.ink.opacity(isSelected ? 0.8 : 0.55))
         case .dot:
-            // A live process without artwork: the idle dot turns blue so
-            // "something is running here" reads at a glance.
-            Circle()
-                .fill(Color.blue.opacity(isSelected ? 0.95 : 0.7))
-                .frame(width: 8, height: 8)
+            // A live process without artwork: the idle terminal glyph
+            // turns blue so "something is running here" reads at a glance;
+            // unselected rows keep it as quiet as the idle grey.
+            Image("TerminalIdle16")
+                .resizable()
+                .renderingMode(.template)
+                .aspectRatio(contentMode: .fit)
+                .foregroundStyle(Color.blue.opacity(isSelected ? 0.95 : 0.45))
+                .frame(width: 16, height: 16)
         }
     }
 }
@@ -1373,7 +1384,8 @@ private extension View {
 /// While a rename is active, watches for any mouse-down that doesn't land
 /// in the text editor and ends the rename before the click proceeds —
 /// clicking the terminal, another row, or anywhere else exits edit mode.
-private struct RenameClickAway: NSViewRepresentable {
+/// Shared with the terminal header's inline rename.
+struct RenameClickAway: NSViewRepresentable {
     var active: Bool
     let onClickAway: () -> Void
 
@@ -1457,77 +1469,6 @@ private struct SessionCloseButton: View {
     }
 }
 
-/// Phosphor folder icons. SF Symbols has no open-folder glyph. Closed is
-/// the regular weight flattened to normalized polylines; open is the fill
-/// weight, hand-traced with quad curves for the rounded corners.
-private struct FolderGlyph: Shape {
-    let isOpen: Bool
-
-    func path(in rect: CGRect) -> Path {
-        if isOpen {
-            return Self.openFilled(in: rect)
-        }
-        var path = Path()
-        for sub in Self.closed {
-            guard let first = sub.first else { continue }
-            path.move(to: scaled(first, rect))
-            for point in sub.dropFirst() {
-                path.addLine(to: scaled(point, rect))
-            }
-            path.closeSubpath()
-        }
-        return path
-    }
-
-    /// Phosphor "folder-open-fill" (256 viewBox); the second subpath cuts
-    /// the notch out via the even-odd fill the caller applies.
-    private static func openFilled(in rect: CGRect) -> Path {
-        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-            CGPoint(x: rect.minX + x / 256 * rect.width, y: rect.minY + y / 256 * rect.height)
-        }
-        var path = Path()
-        path.move(to: pt(245, 110.6))
-        path.addQuadCurve(to: pt(232, 104), control: pt(244, 104))
-        path.addLine(to: pt(216, 104))
-        path.addLine(to: pt(216, 88))
-        path.addQuadCurve(to: pt(200, 72), control: pt(216, 72))
-        path.addLine(to: pt(130.7, 72))
-        path.addLine(to: pt(102.9, 51.2))
-        path.addQuadCurve(to: pt(93.3, 48), control: pt(98.7, 48))
-        path.addLine(to: pt(40, 48))
-        path.addQuadCurve(to: pt(24, 64), control: pt(24, 48))
-        path.addLine(to: pt(24, 208))
-        path.addQuadCurve(to: pt(32, 216), control: pt(24, 216))
-        path.addLine(to: pt(211.1, 216))
-        path.addQuadCurve(to: pt(218.7, 210.5), control: pt(216.9, 216))
-        path.addLine(to: pt(247.2, 125.1))
-        path.addQuadCurve(to: pt(245, 110.6), control: pt(249, 113))
-        path.closeSubpath()
-
-        path.move(to: pt(93.3, 64))
-        path.addLine(to: pt(123.2, 86.4))
-        path.addQuadCurve(to: pt(128, 88), control: pt(125.3, 88))
-        path.addLine(to: pt(200, 88))
-        path.addLine(to: pt(200, 104))
-        path.addLine(to: pt(69.8, 104))
-        path.addQuadCurve(to: pt(54.6, 114.9), control: pt(58.2, 104))
-        path.addLine(to: pt(40, 158.7))
-        path.addLine(to: pt(40, 64))
-        path.closeSubpath()
-        return path
-    }
-
-    private func scaled(_ point: CGPoint, _ rect: CGRect) -> CGPoint {
-        CGPoint(x: rect.minX + point.x * rect.width, y: rect.minY + point.y * rect.height)
-    }
-
-    private static let closed: [[CGPoint]] = [
-        [CGPoint(x: 0.8438, y: 0.2656), CGPoint(x: 0.8241, y: 0.2656), CGPoint(x: 0.8045, y: 0.2656), CGPoint(x: 0.7849, y: 0.2656), CGPoint(x: 0.7653, y: 0.2656), CGPoint(x: 0.7457, y: 0.2656), CGPoint(x: 0.726, y: 0.2656), CGPoint(x: 0.7064, y: 0.2656), CGPoint(x: 0.6868, y: 0.2656), CGPoint(x: 0.6672, y: 0.2656), CGPoint(x: 0.6476, y: 0.2656), CGPoint(x: 0.6279, y: 0.2656), CGPoint(x: 0.6083, y: 0.2656), CGPoint(x: 0.5887, y: 0.2656), CGPoint(x: 0.5691, y: 0.2656), CGPoint(x: 0.5495, y: 0.2656), CGPoint(x: 0.5298, y: 0.2656), CGPoint(x: 0.5139, y: 0.2575), CGPoint(x: 0.5008, y: 0.2428), CGPoint(x: 0.4878, y: 0.2282), CGPoint(x: 0.4748, y: 0.2135), CGPoint(x: 0.4618, y: 0.1988), CGPoint(x: 0.4487, y: 0.1842), CGPoint(x: 0.4357, y: 0.1695), CGPoint(x: 0.4227, y: 0.1548), CGPoint(x: 0.4087, y: 0.1411), CGPoint(x: 0.3918, y: 0.1313), CGPoint(x: 0.373, y: 0.1259), CGPoint(x: 0.3534, y: 0.125), CGPoint(x: 0.3338, y: 0.125), CGPoint(x: 0.3141, y: 0.125), CGPoint(x: 0.2945, y: 0.125), CGPoint(x: 0.2749, y: 0.125), CGPoint(x: 0.2553, y: 0.125), CGPoint(x: 0.2357, y: 0.125), CGPoint(x: 0.216, y: 0.125), CGPoint(x: 0.1964, y: 0.125), CGPoint(x: 0.1768, y: 0.125), CGPoint(x: 0.1572, y: 0.125), CGPoint(x: 0.1377, y: 0.1272), CGPoint(x: 0.1195, y: 0.1342), CGPoint(x: 0.1035, y: 0.1455), CGPoint(x: 0.0908, y: 0.1604), CGPoint(x: 0.0823, y: 0.178), CGPoint(x: 0.0784, y: 0.1972), CGPoint(x: 0.0781, y: 0.2168), CGPoint(x: 0.0781, y: 0.2364), CGPoint(x: 0.0781, y: 0.256), CGPoint(x: 0.0781, y: 0.2757), CGPoint(x: 0.0781, y: 0.2953), CGPoint(x: 0.0781, y: 0.3149), CGPoint(x: 0.0781, y: 0.3345), CGPoint(x: 0.0781, y: 0.3541), CGPoint(x: 0.0781, y: 0.3738), CGPoint(x: 0.0781, y: 0.3934), CGPoint(x: 0.0781, y: 0.413), CGPoint(x: 0.0781, y: 0.4326), CGPoint(x: 0.0781, y: 0.4522), CGPoint(x: 0.0781, y: 0.4719), CGPoint(x: 0.0781, y: 0.4915), CGPoint(x: 0.0781, y: 0.5111), CGPoint(x: 0.0781, y: 0.5307), CGPoint(x: 0.0781, y: 0.5503), CGPoint(x: 0.0781, y: 0.57), CGPoint(x: 0.0781, y: 0.5896), CGPoint(x: 0.0781, y: 0.6092), CGPoint(x: 0.0781, y: 0.6288), CGPoint(x: 0.0781, y: 0.6484), CGPoint(x: 0.0781, y: 0.6681), CGPoint(x: 0.0781, y: 0.6877), CGPoint(x: 0.0781, y: 0.7073), CGPoint(x: 0.0781, y: 0.7269), CGPoint(x: 0.0781, y: 0.7465), CGPoint(x: 0.0781, y: 0.7662), CGPoint(x: 0.0782, y: 0.7858), CGPoint(x: 0.0812, y: 0.8051), CGPoint(x: 0.0892, y: 0.823), CGPoint(x: 0.1014, y: 0.8382), CGPoint(x: 0.1172, y: 0.8499), CGPoint(x: 0.1354, y: 0.8571), CGPoint(x: 0.1548, y: 0.8594), CGPoint(x: 0.1744, y: 0.8594), CGPoint(x: 0.194, y: 0.8594), CGPoint(x: 0.2136, y: 0.8594), CGPoint(x: 0.2333, y: 0.8594), CGPoint(x: 0.2529, y: 0.8594), CGPoint(x: 0.2725, y: 0.8594), CGPoint(x: 0.2921, y: 0.8594), CGPoint(x: 0.3117, y: 0.8594), CGPoint(x: 0.3314, y: 0.8594), CGPoint(x: 0.351, y: 0.8594), CGPoint(x: 0.3706, y: 0.8594), CGPoint(x: 0.3902, y: 0.8594), CGPoint(x: 0.4098, y: 0.8594), CGPoint(x: 0.4295, y: 0.8594), CGPoint(x: 0.4491, y: 0.8594), CGPoint(x: 0.4687, y: 0.8594), CGPoint(x: 0.4883, y: 0.8594), CGPoint(x: 0.5079, y: 0.8594), CGPoint(x: 0.5276, y: 0.8594), CGPoint(x: 0.5472, y: 0.8594), CGPoint(x: 0.5668, y: 0.8594), CGPoint(x: 0.5864, y: 0.8594), CGPoint(x: 0.606, y: 0.8594), CGPoint(x: 0.6256, y: 0.8594), CGPoint(x: 0.6453, y: 0.8594), CGPoint(x: 0.6649, y: 0.8594), CGPoint(x: 0.6845, y: 0.8594), CGPoint(x: 0.7041, y: 0.8594), CGPoint(x: 0.7237, y: 0.8594), CGPoint(x: 0.7434, y: 0.8594), CGPoint(x: 0.763, y: 0.8594), CGPoint(x: 0.7826, y: 0.8594), CGPoint(x: 0.8022, y: 0.8594), CGPoint(x: 0.8218, y: 0.8594), CGPoint(x: 0.8415, y: 0.8594), CGPoint(x: 0.861, y: 0.8581), CGPoint(x: 0.8796, y: 0.852), CGPoint(x: 0.8959, y: 0.8412), CGPoint(x: 0.909, y: 0.8266), CGPoint(x: 0.9177, y: 0.8092), CGPoint(x: 0.9217, y: 0.79), CGPoint(x: 0.9219, y: 0.7704), CGPoint(x: 0.9219, y: 0.7508), CGPoint(x: 0.9219, y: 0.7311), CGPoint(x: 0.9219, y: 0.7115), CGPoint(x: 0.9219, y: 0.6919), CGPoint(x: 0.9219, y: 0.6723), CGPoint(x: 0.9219, y: 0.6527), CGPoint(x: 0.9219, y: 0.633), CGPoint(x: 0.9219, y: 0.6134), CGPoint(x: 0.9219, y: 0.5938), CGPoint(x: 0.9219, y: 0.5742), CGPoint(x: 0.9219, y: 0.5546), CGPoint(x: 0.9219, y: 0.5349), CGPoint(x: 0.9219, y: 0.5153), CGPoint(x: 0.9219, y: 0.4957), CGPoint(x: 0.9219, y: 0.4761), CGPoint(x: 0.9219, y: 0.4565), CGPoint(x: 0.9219, y: 0.4368), CGPoint(x: 0.9219, y: 0.4172), CGPoint(x: 0.9219, y: 0.3976), CGPoint(x: 0.9219, y: 0.378), CGPoint(x: 0.9219, y: 0.3584), CGPoint(x: 0.9217, y: 0.3388), CGPoint(x: 0.918, y: 0.3195), CGPoint(x: 0.9097, y: 0.3018), CGPoint(x: 0.8972, y: 0.2868), CGPoint(x: 0.8814, y: 0.2753), CGPoint(x: 0.8632, y: 0.2681), CGPoint(x: 0.8438, y: 0.2656)],
-        [CGPoint(x: 0.1719, y: 0.2188), CGPoint(x: 0.1917, y: 0.2188), CGPoint(x: 0.2115, y: 0.2188), CGPoint(x: 0.2313, y: 0.2188), CGPoint(x: 0.2512, y: 0.2188), CGPoint(x: 0.271, y: 0.2188), CGPoint(x: 0.2908, y: 0.2188), CGPoint(x: 0.3106, y: 0.2188), CGPoint(x: 0.3305, y: 0.2188), CGPoint(x: 0.3503, y: 0.2188), CGPoint(x: 0.3647, y: 0.2308), CGPoint(x: 0.3779, y: 0.2456), CGPoint(x: 0.391, y: 0.2605), CGPoint(x: 0.3827, y: 0.2656), CGPoint(x: 0.3629, y: 0.2656), CGPoint(x: 0.3431, y: 0.2656), CGPoint(x: 0.3232, y: 0.2656), CGPoint(x: 0.3034, y: 0.2656), CGPoint(x: 0.2836, y: 0.2656), CGPoint(x: 0.2638, y: 0.2656), CGPoint(x: 0.2439, y: 0.2656), CGPoint(x: 0.2241, y: 0.2656), CGPoint(x: 0.2043, y: 0.2656), CGPoint(x: 0.1845, y: 0.2656), CGPoint(x: 0.1719, y: 0.2584), CGPoint(x: 0.1719, y: 0.2386), CGPoint(x: 0.1719, y: 0.2188)],
-        [CGPoint(x: 0.8281, y: 0.7656), CGPoint(x: 0.8084, y: 0.7656), CGPoint(x: 0.7888, y: 0.7656), CGPoint(x: 0.7691, y: 0.7656), CGPoint(x: 0.7494, y: 0.7656), CGPoint(x: 0.7297, y: 0.7656), CGPoint(x: 0.7101, y: 0.7656), CGPoint(x: 0.6904, y: 0.7656), CGPoint(x: 0.6707, y: 0.7656), CGPoint(x: 0.651, y: 0.7656), CGPoint(x: 0.6314, y: 0.7656), CGPoint(x: 0.6117, y: 0.7656), CGPoint(x: 0.592, y: 0.7656), CGPoint(x: 0.5723, y: 0.7656), CGPoint(x: 0.5527, y: 0.7656), CGPoint(x: 0.533, y: 0.7656), CGPoint(x: 0.5133, y: 0.7656), CGPoint(x: 0.4936, y: 0.7656), CGPoint(x: 0.474, y: 0.7656), CGPoint(x: 0.4543, y: 0.7656), CGPoint(x: 0.4346, y: 0.7656), CGPoint(x: 0.4149, y: 0.7656), CGPoint(x: 0.3953, y: 0.7656), CGPoint(x: 0.3756, y: 0.7656), CGPoint(x: 0.3559, y: 0.7656), CGPoint(x: 0.3362, y: 0.7656), CGPoint(x: 0.3166, y: 0.7656), CGPoint(x: 0.2969, y: 0.7656), CGPoint(x: 0.2772, y: 0.7656), CGPoint(x: 0.2575, y: 0.7656), CGPoint(x: 0.2378, y: 0.7656), CGPoint(x: 0.2182, y: 0.7656), CGPoint(x: 0.1985, y: 0.7656), CGPoint(x: 0.1788, y: 0.7656), CGPoint(x: 0.1719, y: 0.7529), CGPoint(x: 0.1719, y: 0.7332), CGPoint(x: 0.1719, y: 0.7135), CGPoint(x: 0.1719, y: 0.6939), CGPoint(x: 0.1719, y: 0.6742), CGPoint(x: 0.1719, y: 0.6545), CGPoint(x: 0.1719, y: 0.6348), CGPoint(x: 0.1719, y: 0.6152), CGPoint(x: 0.1719, y: 0.5955), CGPoint(x: 0.1719, y: 0.5758), CGPoint(x: 0.1719, y: 0.5561), CGPoint(x: 0.1719, y: 0.5365), CGPoint(x: 0.1719, y: 0.5168), CGPoint(x: 0.1719, y: 0.4971), CGPoint(x: 0.1719, y: 0.4774), CGPoint(x: 0.1719, y: 0.4578), CGPoint(x: 0.1719, y: 0.4381), CGPoint(x: 0.1719, y: 0.4184), CGPoint(x: 0.1719, y: 0.3987), CGPoint(x: 0.1719, y: 0.3791), CGPoint(x: 0.1719, y: 0.3594), CGPoint(x: 0.1916, y: 0.3594), CGPoint(x: 0.2112, y: 0.3594), CGPoint(x: 0.2309, y: 0.3594), CGPoint(x: 0.2506, y: 0.3594), CGPoint(x: 0.2703, y: 0.3594), CGPoint(x: 0.2899, y: 0.3594), CGPoint(x: 0.3096, y: 0.3594), CGPoint(x: 0.3293, y: 0.3594), CGPoint(x: 0.349, y: 0.3594), CGPoint(x: 0.3686, y: 0.3594), CGPoint(x: 0.3883, y: 0.3594), CGPoint(x: 0.408, y: 0.3594), CGPoint(x: 0.4277, y: 0.3594), CGPoint(x: 0.4473, y: 0.3594), CGPoint(x: 0.467, y: 0.3594), CGPoint(x: 0.4867, y: 0.3594), CGPoint(x: 0.5064, y: 0.3594), CGPoint(x: 0.526, y: 0.3594), CGPoint(x: 0.5457, y: 0.3594), CGPoint(x: 0.5654, y: 0.3594), CGPoint(x: 0.5851, y: 0.3594), CGPoint(x: 0.6047, y: 0.3594), CGPoint(x: 0.6244, y: 0.3594), CGPoint(x: 0.6441, y: 0.3594), CGPoint(x: 0.6638, y: 0.3594), CGPoint(x: 0.6834, y: 0.3594), CGPoint(x: 0.7031, y: 0.3594), CGPoint(x: 0.7228, y: 0.3594), CGPoint(x: 0.7425, y: 0.3594), CGPoint(x: 0.7622, y: 0.3594), CGPoint(x: 0.7818, y: 0.3594), CGPoint(x: 0.8015, y: 0.3594), CGPoint(x: 0.8212, y: 0.3594), CGPoint(x: 0.8281, y: 0.3721), CGPoint(x: 0.8281, y: 0.3918), CGPoint(x: 0.8281, y: 0.4115), CGPoint(x: 0.8281, y: 0.4311), CGPoint(x: 0.8281, y: 0.4508), CGPoint(x: 0.8281, y: 0.4705), CGPoint(x: 0.8281, y: 0.4902), CGPoint(x: 0.8281, y: 0.5098), CGPoint(x: 0.8281, y: 0.5295), CGPoint(x: 0.8281, y: 0.5492), CGPoint(x: 0.8281, y: 0.5689), CGPoint(x: 0.8281, y: 0.5885), CGPoint(x: 0.8281, y: 0.6082), CGPoint(x: 0.8281, y: 0.6279), CGPoint(x: 0.8281, y: 0.6476), CGPoint(x: 0.8281, y: 0.6672), CGPoint(x: 0.8281, y: 0.6869), CGPoint(x: 0.8281, y: 0.7066), CGPoint(x: 0.8281, y: 0.7263), CGPoint(x: 0.8281, y: 0.7459), CGPoint(x: 0.8281, y: 0.7656)],
-    ]
-
-}
 
 // MARK: - Space indicators
 

@@ -2,19 +2,11 @@ import SwiftUI
 
 struct TerminalWorkspaceView: View {
     @ObservedObject var store: TerminalSessionStore
-    @State private var isRenaming = false
-    @State private var draftTitle = ""
 
     var body: some View {
         VStack(spacing: 0) {
             if let session = store.selectedSession {
-                TerminalHeaderView(
-                    session: session,
-                    onRename: {
-                        draftTitle = session.title
-                        isRenaming = true
-                    }
-                )
+                TerminalHeaderView(session: session, store: store)
             }
 
             // Always mounted: the host container persists across session
@@ -43,51 +35,6 @@ struct TerminalWorkspaceView: View {
         // those instantly — but only those: scoped to selection changes so
         // the sidebar show/hide spring still animates the card's geometry.
         .transaction(value: store.selection) { $0.animation = nil }
-        .sheet(isPresented: $isRenaming, onDismiss: {
-            GhosttySurfaceManager.shared.restoreFocus(to: store.selection)
-        }) {
-            RenameSessionSheet(
-                title: $draftTitle,
-                onCancel: {
-                    isRenaming = false
-                },
-                onSave: {
-                    if let session = store.selectedSession {
-                        store.rename(session, to: draftTitle)
-                    }
-                    isRenaming = false
-                }
-            )
-        }
-    }
-}
-
-private struct RenameSessionSheet: View {
-    @Binding var title: String
-    let onCancel: () -> Void
-    let onSave: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Rename Tab")
-                .font(.headline)
-
-            TextField("Tab name", text: $title)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 320)
-
-            HStack {
-                Spacer()
-
-                Button("Cancel", action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-
-                Button("Save", action: onSave)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(20)
     }
 }
 

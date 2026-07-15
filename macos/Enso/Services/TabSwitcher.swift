@@ -157,10 +157,22 @@ struct TabSwitcherHUD: View {
 
     private func row(_ session: TerminalSession, isHighlighted: Bool) -> some View {
         HStack(spacing: 14) {
-            Circle()
-                .fill(session.accent.color.opacity(isHighlighted ? 1 : 0.9))
-                .frame(width: 9, height: 9)
-                .frame(width: 20, alignment: .center)
+            // Detected-process badge when something is running, the plain
+            // accent dot otherwise; the fixed-width slot keeps titles
+            // aligned either way.
+            Group {
+                if let process = session.runningProcess {
+                    RowProcessBadge(process: process, isHighlighted: isHighlighted)
+                } else {
+                    Image("TerminalIdle16")
+                        .resizable()
+                        .renderingMode(.template)
+                        .aspectRatio(contentMode: .fit)
+                        .foregroundStyle(Theme.ink.opacity(isHighlighted ? 0.9 : 0.4))
+                        .frame(width: 22, height: 22)
+                }
+            }
+            .frame(width: 20, alignment: .center)
 
             Text(session.title)
                 .font(PaletteFont.display(16, Font.Weight.regular.bumped(for: colorScheme)))
@@ -176,9 +188,12 @@ struct TabSwitcherHUD: View {
                         .font(PaletteFont.text(15))
                         .foregroundStyle(Theme.text(isHighlighted ? 0.5 : 0.38))
                         .lineLimit(1)
-                    Image(systemName: "folder")
-                        .font(.system(size: 12, weight: .regular))
+                    Image("FolderClosed16")
+                        .resizable()
+                        .renderingMode(.template)
+                        .aspectRatio(contentMode: .fit)
                         .foregroundStyle(Theme.text(isHighlighted ? 0.45 : 0.34))
+                        .frame(width: 13, height: 13)
                 }
             }
         }

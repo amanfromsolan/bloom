@@ -2,11 +2,19 @@ import SwiftUI
 
 /// Slim strip above the terminal that doubles as the window titlebar:
 /// blends into the terminal background, drags the window. Double-click on
-/// the title renames; double-click on empty strip zooms like a real
-/// titlebar. Shows the tab name plus a live breadcrumb of the shell's cwd.
+/// the title renames it in place; double-click on empty strip zooms like a
+/// real titlebar. Shows the tab name plus a live breadcrumb of the shell's
+/// cwd.
 struct TerminalHeaderView: View {
     let session: TerminalSession
-    let onRename: () -> Void
+    @ObservedObject var store: TerminalSessionStore
+
+    @State private var isRenaming = false
+    @State private var draftTitle = ""
+    @FocusState private var renameFieldFocused: Bool
+
+    /// Measured strip width; caps the title cluster below.
+    @State private var headerWidth: CGFloat = 0
 
     var body: some View {
         HStack(spacing: 8) {
@@ -17,28 +25,73 @@ struct TerminalHeaderView: View {
                 if let process = session.runningProcess {
                     HeaderProcessBadge(process: process, ink: terminalInk)
                 } else {
-                    Circle()
-                        .fill(terminalInk.opacity(0.5))
-                        .frame(width: 6, height: 6)
+                    // Idle terminal glyph, tinted like the tool badges;
+                    // 24 pt from the full-bleed header artwork, same slot
+                    // the agent marks occupy.
+                    Image("TerminalIdleHeader")
+                        .resizable()
+                        .renderingMode(.template)
+                        .aspectRatio(contentMode: .fit)
+                        .foregroundStyle(terminalInk.opacity(0.5))
+                        .frame(width: 24, height: 24)
                 }
 
-                Text(session.title)
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(terminalInk.opacity(0.9))
-                    .lineLimit(1)
+                if isRenaming {
+                    // An invisible twin of the title keeps the field exactly
+                    // as wide as the typed text — a fixed-width field would
+                    // shove the breadcrumb sideways the moment editing
+                    // starts. The trailing space gives the caret room.
+                    Text(draftTitle + " ")
+                        .font(.system(size: 15, weight: .regular))
+                        .lineLimit(1)
+                        .opacity(0)
+                        .overlay {
+                            TextField("", text: $draftTitle)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(terminalInk.opacity(0.9))
+                                .focused($renameFieldFocused)
+                                .onSubmit {
+                                    commitRename()
+                                    restoreTerminalFocus()
+                                }
+                                .onExitCommand {
+                                    isRenaming = false
+                                    restoreTerminalFocus()
+                                }
+                        }
+                } else {
+                    Text(session.title)
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(terminalInk.opacity(0.9))
+                        .lineLimit(1)
+                }
 
                 breadcrumb
             }
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
-                onRename()
+                beginRename()
             }
+            // A long title + breadcrumb never swallows the whole strip:
+            // cap the cluster at 80% so the header keeps visible breathing
+            // room (and drag/zoom target) on the right. A max, not a fixed
+            // width — short titles still hug their content.
+            .frame(
+                maxWidth: headerWidth > 0 ? headerWidth * 0.8 : nil,
+                alignment: .leading
+            )
 
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .frame(height: 46)
         .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { width in
+            headerWidth = width
+        }
         #if DEBUG
         // Overlaid so the badge claims no room from the title cluster.
         .overlay(alignment: .trailing) {
@@ -54,6 +107,44 @@ struct TerminalHeaderView: View {
         // Sits behind the title cluster, whose own double-click (rename)
         // keeps taking precedence.
         .background(WindowDragHandle())
+        // Click-away while renaming: keep the edit (matching focus-loss
+        // behavior) and let the click do its normal job — same contract as
+        // the sidebar's inline renames.
+        .background(
+            RenameClickAway(active: isRenaming) {
+                commitRename()
+            }
+        )
+        .onChange(of: renameFieldFocused) { _, focused in
+            if !focused, isRenaming {
+                commitRename()
+            }
+        }
+    }
+
+    // MARK: - Rename
+
+    private func beginRename() {
+        guard !isRenaming else { return }
+        draftTitle = session.title
+        isRenaming = true
+        renameFieldFocused = true
+    }
+
+    /// Commit doubles as cancel: a blanked or untouched title leaves the
+    /// session alone.
+    private func commitRename() {
+        guard isRenaming else { return }
+        isRenaming = false
+        let trimmed = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != session.title else { return }
+        store.rename(session, to: trimmed)
+    }
+
+    /// Ending a rename leaves first responder parked nowhere, so Return
+    /// stops reaching the shell; hand the keyboard back to the terminal.
+    private func restoreTerminalFocus() {
+        GhosttySurfaceManager.shared.restoreFocus(to: store.selection)
     }
 
     /// Ink for the process badge. The header sits on the Ghostty theme
@@ -126,10 +217,13 @@ private struct HeaderProcessBadge: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(ink.opacity(0.6))
         case .dot:
-            // A live process without artwork: the idle dot turns blue.
-            Circle()
-                .fill(Color.blue.opacity(0.8))
-                .frame(width: 6, height: 6)
+            // A live process without artwork: the idle glyph turns blue.
+            Image("TerminalIdleHeader")
+                .resizable()
+                .renderingMode(.template)
+                .aspectRatio(contentMode: .fit)
+                .foregroundStyle(Color.blue.opacity(0.8))
+                .frame(width: 24, height: 24)
         }
     }
 
@@ -284,9 +378,7 @@ struct PathTrail {
 }
 
 #Preview {
-    TerminalHeaderView(
-        session: TerminalSessionStore.preview.sessions[0],
-        onRename: {}
-    )
+    let store = TerminalSessionStore.preview
+    TerminalHeaderView(session: store.sessions[0], store: store)
         .background(.black)
 }
