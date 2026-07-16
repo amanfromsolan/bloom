@@ -301,12 +301,6 @@ private struct SpacePage: View {
     /// Pointer X where the drag entered; ambiguous gaps read the horizontal
     /// travel from here to pick nest-into-folder vs loose.
     @State private var dragReferenceX: CGFloat?
-    /// Collapsed folder pending hover-to-expand, and the scheduled work.
-    @State private var autoExpandFolderID: TerminalFolder.ID?
-    @State private var autoExpandWork: DispatchWorkItem?
-    /// Folders sprung open by hover during this drag; the ones that don't
-    /// receive the drop fold back when it ends.
-    @State private var autoExpandedDuringDrag: [TerminalFolder.ID] = []
     /// SwiftUI has no end-of-drag callback, so a slow watcher polls the
     /// mouse button during a tracked drag; button-up with no drop delivered
     /// means the drag was cancelled (ESC, or released outside any target).
@@ -1166,10 +1160,6 @@ private struct SpacePage: View {
         store.activeSidebarDrag = payload
         dropProposal = nil
         dragReferenceX = nil
-        autoExpandWork?.cancel()
-        autoExpandWork = nil
-        autoExpandFolderID = nil
-        autoExpandedDuringDrag = []
         startDragWatch()
     }
 
@@ -1201,7 +1191,6 @@ private struct SpacePage: View {
         // indicator (dropExited doesn't reliably fire after a drop).
         guard let payload = store.activeSidebarDrag else {
             if dropProposal != nil { dropProposal = nil }
-            scheduleAutoExpand(for: nil)
             return false
         }
         let resolver = SidebarDropResolver(
@@ -1215,44 +1204,9 @@ private struct SpacePage: View {
             horizontalDelta: location.x - (dragReferenceX ?? location.x)
         )
         dropProposal = resolution.proposal
-        scheduleAutoExpand(for: resolution.proposal)
         // A no-op slot shows nothing but keeps the move cursor; only truly
         // invalid positions read as forbidden.
         return !resolution.isInvalid
-    }
-
-    /// Hovering a collapsed folder with drop-into intent springs it open
-    /// after a beat. Folders opened this way fold back at end-of-drag
-    /// unless they received the drop.
-    private func scheduleAutoExpand(for proposal: SidebarDropProposal?) {
-        let target: TerminalFolder.ID? = {
-            if case .folderHighlight(let id) = proposal?.indicator,
-               store.collapsedFolderIDs.contains(id) {
-                return id
-            }
-            return nil
-        }()
-        guard target != autoExpandFolderID else { return }
-        autoExpandWork?.cancel()
-        autoExpandWork = nil
-        autoExpandFolderID = target
-        guard let target else { return }
-        let work = DispatchWorkItem {
-            if store.collapsedFolderIDs.remove(target) != nil {
-                autoExpandedDuringDrag.append(target)
-            }
-        }
-        autoExpandWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-    }
-
-    /// Folds back every folder that hover sprang open, except the one that
-    /// received the drop (Finder behavior).
-    private func recollapseAutoExpandedFolders(except keepID: TerminalFolder.ID?) {
-        for folderID in autoExpandedDuringDrag where folderID != keepID {
-            store.collapsedFolderIDs.insert(folderID)
-        }
-        autoExpandedDuringDrag = []
     }
 
     private func endDragTracking() {
@@ -1261,9 +1215,6 @@ private struct SpacePage: View {
         dragReferenceX = nil
         scrollDriver.onAutoScroll = nil
         scrollDriver.stop()
-        autoExpandWork?.cancel()
-        autoExpandWork = nil
-        autoExpandFolderID = nil
     }
 
     // MARK: End-of-drag watch
@@ -1304,7 +1255,6 @@ private struct SpacePage: View {
             restoreDraggedFolderExpansion(folderID)
         }
         store.activeSidebarDrag = nil
-        recollapseAutoExpandedFolders(except: nil)
         endDragTracking()
     }
 
@@ -1317,15 +1267,9 @@ private struct SpacePage: View {
         // Cleared synchronously so any trailing dropUpdated resolves to no
         // payload — and therefore no indicator.
         store.activeSidebarDrag = nil
-        guard let proposal else {
-            recollapseAutoExpandedFolders(except: nil)
-            return false
-        }
+        guard let proposal else { return false }
         let providers = info.itemProviders(for: [.text])
-        guard !providers.isEmpty else {
-            recollapseAutoExpandedFolders(except: nil)
-            return false
-        }
+        guard !providers.isEmpty else { return false }
         let spaceID = space.id
         Task { @MainActor in
             var items: [String] = []
@@ -1334,10 +1278,7 @@ private struct SpacePage: View {
                     items.append(item)
                 }
             }
-            guard let payload = SidebarDragPayload.decode(items: items) else {
-                recollapseAutoExpandedFolders(except: nil)
-                return
-            }
+            guard let payload = SidebarDragPayload.decode(items: items) else { return }
             store.applySidebarDrop(payload, target: proposal.target, inSpace: spaceID)
             if case .folder(let folderID) = payload {
                 restoreDraggedFolderExpansion(folderID)
@@ -1354,7 +1295,6 @@ private struct SpacePage: View {
             if let landedFolderID {
                 _ = store.collapsedFolderIDs.remove(landedFolderID)
             }
-            recollapseAutoExpandedFolders(except: landedFolderID)
         }
         return true
     }
@@ -1616,9 +1556,6 @@ private struct SpaceIndicatorBar: View {
 
     @State private var hoveredSpaceID: SidebarSpace.ID?
     @State private var plusHovered = false
-    /// Spring-loading: a drag hovering a space dot switches to that space
-    /// after a beat, so mouse drags can cross spaces.
-    @State private var springLoadWork: DispatchWorkItem?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -1657,11 +1594,6 @@ private struct SpaceIndicatorBar: View {
                     }
                     .disabled(store.spaces.count == 1)
                 }
-                .onDrop(of: [.text], delegate: SpaceDotSpringDelegate(
-                    onEnter: { scheduleSpringLoad(to: space.id) },
-                    onExit: { cancelSpringLoad() },
-                    onPerform: { handleDotDrop($0, spaceID: space.id) }
-                ))
             }
 
             Button(action: onCreate) {
@@ -1683,65 +1615,6 @@ private struct SpaceIndicatorBar: View {
         .frame(height: 30)
         .padding(.bottom, 6)
     }
-
-    private func scheduleSpringLoad(to spaceID: SidebarSpace.ID) {
-        springLoadWork?.cancel()
-        springLoadWork = nil
-        guard spaceID != store.activeSpaceID else { return }
-        let work = DispatchWorkItem {
-            withAnimation(.spring(duration: 0.32, bounce: 0.12)) {
-                store.setActiveSpace(spaceID)
-            }
-        }
-        springLoadWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
-    }
-
-    private func cancelSpringLoad() {
-        springLoadWork?.cancel()
-        springLoadWork = nil
-    }
-
-    /// Releasing on a dot moves the payload to that space outright — the
-    /// same semantics as the "Move to Space" context menu.
-    private func handleDotDrop(_ info: DropInfo, spaceID: SidebarSpace.ID) -> Bool {
-        cancelSpringLoad()
-        let providers = info.itemProviders(for: [.text])
-        guard !providers.isEmpty else { return false }
-        Task { @MainActor in
-            var items: [String] = []
-            for provider in providers {
-                if let item = await provider.sidebarDragString() {
-                    items.append(item)
-                }
-            }
-            guard let payload = SidebarDragPayload.decode(items: items) else { return }
-            switch payload {
-            case .tabs(let ids):
-                store.unpin(Set(ids), inSpace: spaceID)
-            case .folder(let folderID):
-                store.moveFolder(folderID, toSpace: spaceID)
-                if store.sidebarDragFolderWasExpanded {
-                    _ = store.collapsedFolderIDs.remove(folderID)
-                }
-            }
-            store.activeSidebarDrag = nil
-        }
-        return true
-    }
-}
-
-/// Spring-load delegate for one space dot: entering starts the delayed
-/// switch, leaving cancels it, releasing moves the payload to the space.
-private struct SpaceDotSpringDelegate: DropDelegate {
-    let onEnter: () -> Void
-    let onExit: () -> Void
-    let onPerform: (DropInfo) -> Bool
-
-    func dropEntered(info: DropInfo) { onEnter() }
-    func dropExited(info: DropInfo) { onExit() }
-    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
-    func performDrop(info: DropInfo) -> Bool { onPerform(info) }
 }
 
 private struct SpaceIndicatorIcon: View {
