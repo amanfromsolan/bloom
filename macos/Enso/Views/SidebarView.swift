@@ -813,12 +813,16 @@ private struct SpacePage: View {
                 }
             }
             .padding(.leading, 14)
-            // Trailing breathing room so the selected row's drop shadow
-            // isn't clipped sideways by this container's collapse clip (the
-            // clip is what lets rows vanish into the folder when it folds).
+            // Breathing room so the selected row's drop shadow isn't clipped
+            // sideways or below by this container's collapse clip (the clip
+            // is what lets rows vanish into the folder when it folds). The
+            // bottom room is reclaimed after the clip so the folder's height
+            // and the gap to the next row don't change.
             .padding(.trailing, 6)
+            .padding(.bottom, 5)
             .frame(height: isExpanded ? nil : 0, alignment: .top)
             .clipped()
+            .padding(.bottom, isExpanded ? -5 : 0)
             .allowsHitTesting(isExpanded)
             .opacity(isExpanded ? 1 : 0)
 
