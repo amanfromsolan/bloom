@@ -460,9 +460,9 @@ private struct SpacePage: View {
 
             Spacer(minLength: 0)
 
-            // Always laid out, faded on hover: conditionally inserting the
-            // 18pt controls changes the row height and jolts the sidebar.
-            Group {
+            // Inserted only on hover so the title gets the full row width when
+            // idle; the fixed minHeight below keeps the row from shifting.
+            if headerHovered && !isRenamingSpace {
                 // Collapse/expand-all toggle, left of the ⋯ menu. Only present
                 // when the space has folders to fold; laid out alongside the
                 // menu so the header height never shifts.
@@ -506,10 +506,14 @@ private struct SpacePage: View {
                         .fill(Theme.ink.opacity(headerMenuHovered ? 0.12 : 0))
                 )
                 .onHover { headerMenuHovered = $0 }
+                // The hover state outlives the view (it belongs to the page),
+                // and removal can beat the exit event — picking Rename tears
+                // this branch out mid-hover. Reset on the way out so the ⋯
+                // never comes back pre-highlighted.
+                .onDisappear { headerMenuHovered = false }
             }
-            .opacity(headerHovered && !isRenamingSpace ? 1 : 0)
-            .allowsHitTesting(headerHovered && !isRenamingSpace)
         }
+        .frame(minHeight: 18)
         .padding(.horizontal, 9)
         .padding(.vertical, 8)
         .background(
@@ -716,19 +720,21 @@ private struct SpacePage: View {
 
                 Spacer(minLength: 0)
 
-                // Always laid out, faded on hover — see spaceHeader.
-                HoverIconButton(systemName: "plus", help: "New Terminal in Folder") {
-                    store.createSession(inFolder: folder.id)
-                }
-                .opacity(isHovered && !isRenaming ? 1 : 0)
-                .allowsHitTesting(isHovered && !isRenaming)
+                // Inserted only on hover so the title gets the full row width
+                // when idle — see spaceHeader. Gated off during rename too,
+                // so hovering can't resize the focused rename field.
+                if isHovered && !isRenaming {
+                    HoverIconButton(systemName: "plus", help: "New Terminal in Folder") {
+                        store.createSession(inFolder: folder.id)
+                    }
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Theme.text(0.4))
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .opacity(isHovered ? 1 : 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Theme.text(0.4))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
             }
+            .frame(minHeight: 18)
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
