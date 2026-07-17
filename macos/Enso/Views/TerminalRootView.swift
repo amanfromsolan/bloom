@@ -6,6 +6,7 @@ struct TerminalRootView: View {
     @ObservedObject private var commandCenter = CommandCenter.shared
     @ObservedObject private var updateController = UpdateController.shared
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.controlActiveState) private var controlActiveState
     @State private var spaceEditor: SpaceEditorSheet.Mode?
     @State private var isPeeking = false
     // Full screen relocates the sidebar toggle: the titlebar (and the
@@ -19,6 +20,11 @@ struct TerminalRootView: View {
     @State private var cardCornerRadius: CGFloat = WindowCornerRadiusReader.inset
     @SceneStorage("selectedSessionID") private var storedSelection: String?
 
+    // Inactive-window chrome dim, the standard macOS treatment: sidebar text,
+    // icons, and tints drop toward grey while the window isn't key. The
+    // terminal card keeps its colors, as terminals conventionally do.
+    private var isWindowInactive: Bool { controlActiveState == .inactive }
+
     var body: some View {
         HStack(spacing: 0) {
             if store.isSidebarVisible {
@@ -28,6 +34,8 @@ struct TerminalRootView: View {
 
                     SidebarView(store: store, spaceEditor: $spaceEditor)
                 }
+                .saturation(isWindowInactive ? 0 : 1)
+                .opacity(isWindowInactive ? 0.6 : 1)
                 // Drags the window, double-click zooms like a real titlebar.
                 // Handled in AppKit (see WindowDragHandle) because SwiftUI's
                 // WindowDragGesture starves a paired double-click tap. An
@@ -110,6 +118,7 @@ struct TerminalRootView: View {
         .background(TrafficLightInset(
             buttonsHidden: !(store.isSidebarVisible || isPeeking),
             isSidebarVisible: store.isSidebarVisible,
+            isWindowInactive: isWindowInactive,
             onToggleSidebar: { store.isSidebarVisible.toggle() },
             onFullScreenChange: { isFullScreen = $0 }
         ))
@@ -154,6 +163,7 @@ struct TerminalRootView: View {
                 SidebarToggleButton(isSidebarVisible: store.isSidebarVisible) {
                     store.isSidebarVisible.toggle()
                 }
+                .opacity(isWindowInactive ? 0.5 : 1)
                 .padding(.leading, 16)
                 .padding(.top, 8)
             }
@@ -311,6 +321,8 @@ struct TerminalRootView: View {
             Color.clear.frame(height: 40)
             SidebarView(store: store, spaceEditor: $spaceEditor)
         }
+        .saturation(isWindowInactive ? 0 : 1)
+        .opacity(isWindowInactive ? 0.6 : 1)
         .frame(width: store.sidebarWidth)
         .frame(maxHeight: .infinity)
         .background(
@@ -576,6 +588,7 @@ private struct WindowCornerRadiusReader: NSViewRepresentable {
 private struct TrafficLightInset: NSViewRepresentable {
     var buttonsHidden: Bool
     var isSidebarVisible: Bool
+    var isWindowInactive: Bool
     var onToggleSidebar: () -> Void
     /// The coordinator owns full-screen truth (it sees the window, including
     /// one restored straight into full screen at launch) and reports it up.
@@ -592,6 +605,7 @@ private struct TrafficLightInset: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.onFullScreenChange = onFullScreenChange
         context.coordinator.setButtonsHidden(buttonsHidden)
+        context.coordinator.setWindowInactive(isWindowInactive)
         context.coordinator.updateToggle(isSidebarVisible: isSidebarVisible, action: onToggleSidebar)
     }
 
@@ -602,6 +616,7 @@ private struct TrafficLightInset: NSViewRepresentable {
         private weak var window: NSWindow?
         private var buttonsHidden = false
         private var isFullScreen = false
+        private var isWindowInactive = false
         var onFullScreenChange: (Bool) -> Void = { _ in }
         private var isSidebarVisible = true
         private var toggleAction: () -> Void = {}
@@ -656,6 +671,12 @@ private struct TrafficLightInset: NSViewRepresentable {
             toolbar.showsBaselineSeparator = false
             window.toolbar = toolbar
             window.toolbarStyle = .unified
+        }
+
+        func setWindowInactive(_ inactive: Bool) {
+            guard inactive != isWindowInactive else { return }
+            isWindowInactive = inactive
+            pushToggleState()
         }
 
         func setButtonsHidden(_ hidden: Bool) {
@@ -719,6 +740,7 @@ private struct TrafficLightInset: NSViewRepresentable {
             TitlebarSidebarToggle(
                 isSidebarVisible: isSidebarVisible,
                 isConcealed: buttonsHidden || isFullScreen,
+                isWindowInactive: isWindowInactive,
                 action: toggleAction
             )
         }
@@ -749,11 +771,12 @@ private struct TrafficLightInset: NSViewRepresentable {
 private struct TitlebarSidebarToggle: View {
     var isSidebarVisible: Bool
     var isConcealed: Bool
+    var isWindowInactive: Bool
     var action: () -> Void
 
     var body: some View {
         SidebarToggleButton(isSidebarVisible: isSidebarVisible, action: action)
-            .opacity(isConcealed ? 0 : 1)
+            .opacity(isConcealed ? 0 : (isWindowInactive ? 0.5 : 1))
             .allowsHitTesting(!isConcealed)
             .animation(.easeOut(duration: isConcealed ? 0.15 : 0.2), value: isConcealed)
     }
