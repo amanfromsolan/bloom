@@ -546,6 +546,32 @@ struct AgentSessionStoreTests {
         #expect(store.consumeRestore(forTab: tabID) == nil)
     }
 
+    @Test func pendingRestorePreviewMatchesConsumeWithoutConsuming() throws {
+        let root = try makeRoot()
+        defer { try? fm.removeItem(at: root) }
+        let restorableTab = UUID()
+        let cleanTab = UUID()
+        let sessionID = "88888888-8888-8888-8888-888888888888"
+        try writeClaudeTranscript(root: root, sessionID: sessionID)
+        try writeMapFile(root: root, tabID: restorableTab, lines: [
+            launchLine(agent: "claude", sessionID: sessionID, ts: Date.now.timeIntervalSince1970),
+        ])
+        // Cleanly ended session (no quit snapshot either): nothing pending.
+        try writeMapFile(root: root, tabID: cleanTab, lines: [
+            launchLine(agent: "claude", sessionID: sessionID, ts: Date.now.timeIntervalSince1970),
+            hookLine(agent: "claude", name: "SessionEnd", sessionID: sessionID, extra: #","reason":"logout""#, ts: Date.now.timeIntervalSince1970),
+        ])
+
+        let store = makeStore(root: root)
+        store.bootstrap(knownTabIDs: [restorableTab, cleanTab])
+        #expect(store.hasPendingRestore(forTab: restorableTab))
+        #expect(!store.hasPendingRestore(forTab: cleanTab))
+        // The pending check consumed nothing…
+        #expect(store.consumeRestore(forTab: restorableTab) != nil)
+        // …and a consumed tab stops being pending.
+        #expect(!store.hasPendingRestore(forTab: restorableTab))
+    }
+
     @Test func closeRemovesMapFile() throws {
         let root = try makeRoot()
         defer { try? fm.removeItem(at: root) }

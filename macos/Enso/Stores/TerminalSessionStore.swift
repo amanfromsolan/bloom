@@ -598,6 +598,60 @@ final class TerminalSessionStore: ObservableObject {
         }
     }
 
+    // MARK: - Surface plumbing
+
+    /// Wires a surface's event callbacks into the store. Called by the
+    /// workspace host on every display pass and by the eager restore sweep,
+    /// so a background-restored tab reports titles, cwd, and process
+    /// detection — and closes on exit — exactly like a visible one.
+    func wireSurfaceCallbacks(_ surfaceView: GhosttySurfaceView, for sessionID: TerminalSession.ID) {
+        surfaceView.onTitleChange = { [weak self] title in
+            self?.applyShellTitle(sessionID, title: title)
+            TabAutoNamer.shared.noteActivity(sessionID)
+        }
+        surfaceView.onPwdChange = { [weak self] pwd in
+            NSLog("TerminalSessionStore: pwd -> %@", pwd)
+            self?.updateWorkingDirectory(sessionID, to: pwd)
+            TabAutoNamer.shared.noteActivity(sessionID)
+        }
+        surfaceView.onSurfaceClose = { [weak self] in
+            self?.close(sessionID: sessionID)
+        }
+    }
+
+    /// Delay between background restores so a launch with many agent tabs
+    /// doesn't spawn every PTY and agent process in the same instant.
+    private static let eagerRestoreStagger: TimeInterval = 1.0
+
+    /// Launch-time sweep (#45): creates surfaces in the background for every
+    /// tab with a pending agent restore, staggered, so switching to one lands
+    /// on an already-resumed session instead of watching the resume command
+    /// get typed. The selected tab is skipped — the workspace host creates it
+    /// on first render — and tabs without a pending restore stay lazy. Every
+    /// gate is checked at fire time, not here: the pending check reads each
+    /// tab's transcript, so deciding per tick also keeps that I/O off the
+    /// first render.
+    func eagerlyRestoreAgentSessions() {
+        for (index, session) in sessions.filter({ $0.id != selection }).enumerated() {
+            let sessionID = session.id
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + Self.eagerRestoreStagger * Double(index + 1)
+            ) { [weak self] in
+                guard let self else { return }
+                // Re-resolved at fire time: the tab may have closed during
+                // the stagger (its surface must not come back), its restore
+                // may have evaporated (toggled off or consumed — the tab
+                // must stay lazy), and its cwd may have changed. view(for:)
+                // is idempotent, so a tab the user already switched to is a
+                // no-op.
+                guard let live = self.sessions.first(where: { $0.id == sessionID }),
+                      AgentSessionStore.shared.hasPendingRestore(forTab: sessionID)
+                else { return }
+                self.wireSurfaceCallbacks(GhosttySurfaceManager.shared.view(for: live), for: sessionID)
+            }
+        }
+    }
+
     // MARK: - Renaming / status
 
     /// Inline-rename requests from menu shortcuts; the sidebar page owning

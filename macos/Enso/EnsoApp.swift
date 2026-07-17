@@ -155,6 +155,9 @@ struct EnsoApp: App {
                     QuitGuard.shared.attach(store: sessionStore)
                     NSApp.servicesProvider = ServiceProvider.shared
                     UpdateController.shared.start()
+                    // After the first render pass has hosted the selected
+                    // tab's surface, warm the rest (#45).
+                    sessionStore.eagerlyRestoreAgentSessions()
                 }
         }
         .windowStyle(.hiddenTitleBar)

@@ -113,18 +113,34 @@ final class AgentSessionStore {
         let command: String
     }
 
-    /// The restore the tab's new surface should run, at most once per tab
-    /// per app run; nil when restore is off, already consumed, the launch
-    /// argv was rejected by the sanitizer, or the adapter's policy says
-    /// there is nothing to bring back.
-    func consumeRestore(forTab tabID: UUID) -> AgentRestore? {
+    /// The gate chain every restore decision goes through: nil when restore
+    /// is off, already consumed, the launch argv was rejected by the
+    /// sanitizer, or the adapter's policy says there is nothing to bring
+    /// back. Shared so the consuming path and the eager sweep's pending
+    /// check can never drift apart.
+    private func pendingRestore(forTab tabID: UUID) -> AgentRestore? {
         guard isEnabled, !consumedTabIDs.contains(tabID) else { return nil }
         guard let record = records[tabID],
               let adapter = adapters[record.agent],
               let command = adapter.restoreCommand(for: record, quitSnapshot: quitSnapshot, now: .now)
         else { return nil }
-        consumedTabIDs.insert(tabID)
         return AgentRestore(record: record, command: command)
+    }
+
+    /// The restore the tab's new surface should run, at most once per tab
+    /// per app run.
+    func consumeRestore(forTab tabID: UUID) -> AgentRestore? {
+        guard let restore = pendingRestore(forTab: tabID) else { return nil }
+        consumedTabIDs.insert(tabID)
+        return restore
+    }
+
+    /// Whether the tab's next surface would run a restore. The eager launch
+    /// sweep (#45) checks this at each staggered tick — not once up front —
+    /// so a restore that evaporates mid-sweep (toggled off, consumed) leaves
+    /// its tab lazy instead of spawning a surface for nothing.
+    func hasPendingRestore(forTab tabID: UUID) -> Bool {
+        pendingRestore(forTab: tabID) != nil
     }
 
     /// The text typed into the fresh PTY (the trailing newline runs it).

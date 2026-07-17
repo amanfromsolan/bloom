@@ -21,21 +21,8 @@ struct GhosttyTerminalHostView: NSViewRepresentable {
             container.subviews.forEach { $0.removeFromSuperview() }
             return
         }
-        let sessionID = session.id
         let surfaceView = GhosttySurfaceManager.shared.view(for: session)
-
-        surfaceView.onTitleChange = { [weak store] title in
-            store?.applyShellTitle(sessionID, title: title)
-            TabAutoNamer.shared.noteActivity(sessionID)
-        }
-        surfaceView.onPwdChange = { [weak store] pwd in
-            NSLog("GhosttyTerminalHostView: pwd -> %@", pwd)
-            store?.updateWorkingDirectory(sessionID, to: pwd)
-            TabAutoNamer.shared.noteActivity(sessionID)
-        }
-        surfaceView.onSurfaceClose = { [weak store] in
-            store?.close(sessionID: sessionID)
-        }
+        store.wireSurfaceCallbacks(surfaceView, for: session.id)
 
         guard surfaceView.superview !== container else { return }
         container.subviews.forEach { $0.removeFromSuperview() }
