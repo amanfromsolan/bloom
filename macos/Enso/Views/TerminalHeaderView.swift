@@ -50,6 +50,7 @@ struct TerminalHeaderView: View {
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 15, weight: .regular))
                                 .foregroundStyle(terminalInk.opacity(0.9))
+                                .environment(\.colorScheme, terminalColorScheme)
                                 .focused($renameFieldFocused)
                                 .onSubmit {
                                     commitRename()
@@ -147,12 +148,17 @@ struct TerminalHeaderView: View {
         GhosttySurfaceManager.shared.restoreFocus(to: store.selection)
     }
 
-    /// Ink for the process badge. The header sits on the Ghostty theme
-    /// background, not the app chrome, so the tint keys off that color's
-    /// luminance rather than the SwiftUI colorScheme: a light terminal
-    /// theme gets dark ink, a dark theme light ink.
+    /// Ink for the process badge: dark ink on a light terminal theme, light
+    /// ink on a dark one.
     private var terminalInk: Color {
-        GhosttyRuntime.shared.themeBackground.relativeLuminance > 0.179 ? .black : .white
+        GhosttyRuntime.shared.terminalColorScheme == .light ? .black : .white
+    }
+
+    /// Appearance for the rename field's editing chrome — selection
+    /// highlight, caret — so it keys off the terminal background rather than
+    /// the app appearance.
+    private var terminalColorScheme: ColorScheme {
+        GhosttyRuntime.shared.terminalColorScheme
     }
 
     // MARK: - Breadcrumb
@@ -211,7 +217,7 @@ private struct HeaderProcessBadge: View {
                 .renderingMode(.original)
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 24, height: 24)
-                .environment(\.colorScheme, terminalColorScheme)
+                .environment(\.colorScheme, GhosttyRuntime.shared.terminalColorScheme)
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: 13, weight: .medium))
@@ -227,10 +233,15 @@ private struct HeaderProcessBadge: View {
         }
     }
 
-    /// Light terminal theme -> light-appearance artwork; dark -> dark. Same
-    /// luminance threshold as the header's ink.
-    private var terminalColorScheme: ColorScheme {
-        GhosttyRuntime.shared.themeBackground.relativeLuminance > 0.179 ? .light : .dark
+}
+
+private extension GhosttyRuntime {
+    /// The header sits on the Ghostty theme background, not the app chrome,
+    /// so ink, artwork variants, and editing chrome all key off that color's
+    /// luminance rather than the system appearance. The single home for the
+    /// threshold — ink, badge, and rename field must never disagree.
+    var terminalColorScheme: ColorScheme {
+        themeBackground.relativeLuminance > 0.179 ? .light : .dark
     }
 }
 
