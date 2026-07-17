@@ -111,6 +111,9 @@ final class TerminalSessionStore: ObservableObject {
         } ?? activeSpace.sessions.first?.id
         multiSelection = selection.map { [$0] } ?? []
         save()
+        // Warm-up follows the user: drop the old space's unfired restore
+        // ticks and sweep the space now in front of them.
+        eagerlyRestoreAgentSessions()
     }
 
     @discardableResult
@@ -620,44 +623,56 @@ final class TerminalSessionStore: ObservableObject {
     /// doesn't spawn every PTY and agent process in the same instant.
     private static let eagerRestoreStagger: TimeInterval = 1.0
 
-    /// Ceiling on background restores per launch; tabs beyond it stay lazy
+    /// Ceiling on background restores per sweep; tabs beyond it stay lazy
     /// and restore on first switch, as before #45 — wearing the sidebar's
-    /// dormant badge so the pending resume is visible. Bounds the launch
-    /// cost: each eager restore is a live surface plus an agent process
-    /// (the agent dominates — a resumed claude is a full Node process).
-    static let maxEagerRestores = 5
+    /// dormant badge so the pending resume is visible. Bounds each sweep's
+    /// cost: an eager restore is a live surface plus an agent process (the
+    /// agent dominates — a resumed claude is a full Node process). The
+    /// sweep is per space, so switching spaces can warm up to this many
+    /// more; already-warmed tabs are consumed and never recounted.
+    static let maxEagerRestores = 8
 
-    /// The tabs the launch sweep will warm, most recently used first.
-    /// lastActivity persists across launches, so the ordering favors the
-    /// tabs the user is most likely to switch to right after the selected
-    /// one. The pre-filter (injectable for tests) is cheap and precise —
-    /// restorability was resolved once at bootstrap, so no transcript I/O
-    /// happens here and no warm slot is spent on a tab that wouldn't
-    /// actually resume.
+    /// Pending ticks of the sweep in flight; cancelled wholesale when a new
+    /// sweep starts so warm-up effort always chases the active space.
+    private var eagerRestoreTicks: [DispatchWorkItem] = []
+
+    /// The active space's tabs the sweep will warm, most recently used
+    /// first. lastActivity persists across launches, so the ordering favors
+    /// the tabs the user is most likely to switch to right after the
+    /// selected one. Scoped to the active space: that's where the user is
+    /// looking, and other spaces' tabs get their sweep when their space
+    /// becomes active. The pre-filter (injectable for tests) is cheap and
+    /// precise — restorability was resolved once at bootstrap, so no
+    /// transcript I/O happens here and no warm slot is spent on a tab that
+    /// wouldn't actually resume.
     func eagerRestoreCandidates(
         mayRestore: (TerminalSession.ID) -> Bool = { AgentSessionStore.shared.mayRestore(forTab: $0) }
     ) -> [TerminalSession] {
         Array(
-            sessions
+            activeSpace.sessions
                 .filter { $0.id != selection && mayRestore($0.id) }
                 .sorted { $0.lastActivity > $1.lastActivity }
                 .prefix(Self.maxEagerRestores)
         )
     }
 
-    /// Launch-time sweep (#45): creates surfaces in the background for tabs
-    /// with a pending agent restore, staggered, so switching to one lands
-    /// on an already-resumed session instead of watching the resume command
-    /// get typed. The selected tab is skipped — the workspace host creates it
-    /// on first render — and tabs without a pending restore stay lazy. The
-    /// full gate chain (including the adapters' on-disk checks) runs at fire
-    /// time, not here, so that I/O stays off the first render.
+    /// The eager sweep (#45): creates surfaces in the background for the
+    /// active space's tabs with a pending agent restore, staggered, so
+    /// switching to one lands on an already-resumed session instead of
+    /// watching the resume command get typed. The selected tab is skipped —
+    /// the workspace host creates it on first render — and tabs without a
+    /// pending restore stay lazy. Runs at launch and again on every space
+    /// switch: restarting cancels the previous sweep's unfired ticks, and
+    /// tabs it already warmed were consumed, so a re-sweep only picks up
+    /// what's still dormant. The full gate chain (including the adapters'
+    /// on-disk checks) runs at fire time, not here, so that I/O stays off
+    /// the first render.
     func eagerlyRestoreAgentSessions() {
+        eagerRestoreTicks.forEach { $0.cancel() }
+        eagerRestoreTicks = []
         for (index, session) in eagerRestoreCandidates().enumerated() {
             let sessionID = session.id
-            DispatchQueue.main.asyncAfter(
-                deadline: .now() + Self.eagerRestoreStagger * Double(index + 1)
-            ) { [weak self] in
+            let tick = DispatchWorkItem { [weak self] in
                 guard let self else { return }
                 // Re-resolved at fire time: the tab may have closed during
                 // the stagger (its surface must not come back), its restore
@@ -670,6 +685,11 @@ final class TerminalSessionStore: ObservableObject {
                 else { return }
                 self.wireSurfaceCallbacks(GhosttySurfaceManager.shared.view(for: live), for: sessionID)
             }
+            eagerRestoreTicks.append(tick)
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + Self.eagerRestoreStagger * Double(index + 1),
+                execute: tick
+            )
         }
     }
 

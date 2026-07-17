@@ -129,6 +129,38 @@ struct TerminalSessionStoreTests {
         #expect(candidates.map(\.id) == [fresh.id, stale.id])
     }
 
+    @Test func eagerRestoreCandidatesFollowTheActiveSpace() throws {
+        let dir = try makeTempDirectory("spaces")
+        let homeSelected = TerminalSession(title: "home-a", workingDirectory: dir)
+        let homeDormant = TerminalSession(title: "home-b", workingDirectory: dir)
+        let workSelected = TerminalSession(title: "work-a", workingDirectory: dir)
+        let workDormant = TerminalSession(title: "work-b", workingDirectory: dir)
+        let work = SidebarSpace(
+            name: "Work",
+            pinnedFolders: [TerminalFolder(title: "w", sessions: [workSelected, workDormant])],
+            lastSelection: workSelected.id
+        )
+        let store = TerminalSessionStore(
+            spaces: [
+                SidebarSpace(
+                    name: "Home",
+                    pinnedFolders: [TerminalFolder(title: "h", sessions: [homeSelected, homeDormant])],
+                    lastSelection: homeSelected.id
+                ),
+                work,
+            ],
+            persistToDisk: false
+        )
+
+        // Only the active space's tabs are candidates.
+        #expect(store.eagerRestoreCandidates { _ in true }.map(\.id) == [homeDormant.id])
+
+        // Switching spaces re-aims the sweep: the new space's dormant tabs
+        // become the candidates (its remembered selection is skipped).
+        store.setActiveSpace(work.id)
+        #expect(store.eagerRestoreCandidates { _ in true }.map(\.id) == [workDormant.id])
+    }
+
     @Test func eagerRestoreCandidatesAreCapped() throws {
         let dir = try makeTempDirectory("capped")
         // tab-0 is selected (and skipped); tab-1 onward are candidates in
