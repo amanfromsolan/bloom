@@ -620,16 +620,38 @@ final class TerminalSessionStore: ObservableObject {
     /// doesn't spawn every PTY and agent process in the same instant.
     private static let eagerRestoreStagger: TimeInterval = 1.0
 
-    /// Launch-time sweep (#45): creates surfaces in the background for every
-    /// tab with a pending agent restore, staggered, so switching to one lands
+    /// Ceiling on background restores per launch; tabs beyond it stay lazy
+    /// and restore on first switch, as before #45. Bounds the launch cost —
+    /// each eager restore is a live surface plus an agent process — for
+    /// sessions with dozens of agent tabs.
+    static let maxEagerRestores = 8
+
+    /// The tabs the launch sweep will warm, most recently used first.
+    /// lastActivity persists across launches, so the ordering favors the
+    /// tabs the user is most likely to switch to right after the selected
+    /// one. The pre-filter (injectable for tests) is the cheap in-memory
+    /// check — plain shell tabs don't occupy stagger slots or count against
+    /// the ceiling, and no transcript I/O happens at scheduling time.
+    func eagerRestoreCandidates(
+        mayRestore: (TerminalSession.ID) -> Bool = { AgentSessionStore.shared.mayRestore(forTab: $0) }
+    ) -> [TerminalSession] {
+        Array(
+            sessions
+                .filter { $0.id != selection && mayRestore($0.id) }
+                .sorted { $0.lastActivity > $1.lastActivity }
+                .prefix(Self.maxEagerRestores)
+        )
+    }
+
+    /// Launch-time sweep (#45): creates surfaces in the background for tabs
+    /// with a pending agent restore, staggered, so switching to one lands
     /// on an already-resumed session instead of watching the resume command
     /// get typed. The selected tab is skipped — the workspace host creates it
-    /// on first render — and tabs without a pending restore stay lazy. Every
-    /// gate is checked at fire time, not here: the pending check reads each
-    /// tab's transcript, so deciding per tick also keeps that I/O off the
-    /// first render.
+    /// on first render — and tabs without a pending restore stay lazy. The
+    /// full gate chain (including the adapters' on-disk checks) runs at fire
+    /// time, not here, so that I/O stays off the first render.
     func eagerlyRestoreAgentSessions() {
-        for (index, session) in sessions.filter({ $0.id != selection }).enumerated() {
+        for (index, session) in eagerRestoreCandidates().enumerated() {
             let sessionID = session.id
             DispatchQueue.main.asyncAfter(
                 deadline: .now() + Self.eagerRestoreStagger * Double(index + 1)

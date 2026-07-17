@@ -103,6 +103,55 @@ struct TerminalSessionStoreTests {
         #expect(store.selectedSession?.workingDirectory == liveDir)
     }
 
+    // MARK: - Eager restore candidates (#45 / #53)
+
+    @Test func eagerRestoreCandidatesAreMostRecentFirstAndSkipSelectedAndFiltered() throws {
+        let dir = try makeTempDirectory("candidates")
+        let selected = TerminalSession(title: "selected", workingDirectory: dir, lastActivity: .now)
+        let stale = TerminalSession(
+            title: "stale", workingDirectory: dir, lastActivity: .now.addingTimeInterval(-7200)
+        )
+        let fresh = TerminalSession(
+            title: "fresh", workingDirectory: dir, lastActivity: .now.addingTimeInterval(-60)
+        )
+        let plainShell = TerminalSession(
+            title: "shell", workingDirectory: dir, lastActivity: .now.addingTimeInterval(-30)
+        )
+        let store = makeStore(
+            folder: TerminalFolder(title: "enso", sessions: [selected, stale, fresh, plainShell]),
+            select: selected.id
+        )
+
+        let restorable: Set = [selected.id, stale.id, fresh.id]
+        let candidates = store.eagerRestoreCandidates { restorable.contains($0) }
+        // Selected is excluded even though restorable; the plain shell tab
+        // never makes the list; the rest come most recently used first.
+        #expect(candidates.map(\.id) == [fresh.id, stale.id])
+    }
+
+    @Test func eagerRestoreCandidatesAreCapped() throws {
+        let dir = try makeTempDirectory("capped")
+        // tab-0 is selected (and skipped); tab-1 onward are candidates in
+        // strictly decreasing recency.
+        let sessions = (0..<(TerminalSessionStore.maxEagerRestores + 3)).map { index in
+            TerminalSession(
+                title: "tab-\(index)",
+                workingDirectory: dir,
+                lastActivity: .now.addingTimeInterval(-Double(index))
+            )
+        }
+        let store = makeStore(
+            folder: TerminalFolder(title: "enso", sessions: sessions),
+            select: sessions[0].id
+        )
+
+        let candidates = store.eagerRestoreCandidates { _ in true }
+        // The cap keeps the most recently used tabs; the least recent two
+        // stay lazy.
+        #expect(candidates.map(\.id)
+            == sessions[1...TerminalSessionStore.maxEagerRestores].map(\.id))
+    }
+
     // MARK: - Persistence compatibility
 
     /// State files written before the field existed must keep decoding.

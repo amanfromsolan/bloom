@@ -572,6 +572,40 @@ struct AgentSessionStoreTests {
         #expect(!store.hasPendingRestore(forTab: restorableTab))
     }
 
+    @Test func mayRestoreIsACheapSupersetOfPending() throws {
+        let root = try makeRoot()
+        defer { try? fm.removeItem(at: root) }
+        let restorableTab = UUID()
+        let cleanTab = UUID()
+        let sessionID = "77777777-7777-7777-7777-777777777777"
+        try writeClaudeTranscript(root: root, sessionID: sessionID)
+        try writeMapFile(root: root, tabID: restorableTab, lines: [
+            launchLine(agent: "claude", sessionID: sessionID, ts: Date.now.timeIntervalSince1970),
+        ])
+        // Cleanly ended session: adapter policy says no restore, but the
+        // record exists — mayRestore stays true (it's the cheap superset;
+        // the fire-time pending check is what rules this tab out).
+        try writeMapFile(root: root, tabID: cleanTab, lines: [
+            launchLine(agent: "claude", sessionID: sessionID, ts: Date.now.timeIntervalSince1970),
+            hookLine(agent: "claude", name: "SessionEnd", sessionID: sessionID, extra: #","reason":"logout""#, ts: Date.now.timeIntervalSince1970),
+        ])
+
+        let store = makeStore(root: root)
+        store.bootstrap(knownTabIDs: [restorableTab, cleanTab])
+        #expect(store.mayRestore(forTab: restorableTab))
+        #expect(store.mayRestore(forTab: cleanTab))
+        #expect(!store.mayRestore(forTab: UUID()))
+
+        // Consuming closes the gate…
+        _ = store.consumeRestore(forTab: restorableTab)
+        #expect(!store.mayRestore(forTab: restorableTab))
+
+        // …and so does the Settings toggle.
+        UserDefaults(suiteName: "AgentSessionStoreTests")!
+            .set(false, forKey: AgentSessionStore.restoreEnabledDefaultsKey)
+        #expect(!store.mayRestore(forTab: cleanTab))
+    }
+
     @Test func closeRemovesMapFile() throws {
         let root = try makeRoot()
         defer { try? fm.removeItem(at: root) }

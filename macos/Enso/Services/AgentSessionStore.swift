@@ -143,6 +143,15 @@ final class AgentSessionStore {
         pendingRestore(forTab: tabID) != nil
     }
 
+    /// Cheap superset of hasPendingRestore: the in-memory gates only, no
+    /// adapter policy — the adapters' transcript/rollout existence checks
+    /// hit the disk. The eager sweep uses this to pick and rank candidates
+    /// without paying per-tab I/O up front; the full gate chain still runs
+    /// at each staggered tick.
+    func mayRestore(forTab tabID: UUID) -> Bool {
+        isEnabled && !consumedTabIDs.contains(tabID) && records[tabID] != nil
+    }
+
     /// The text typed into the fresh PTY (the trailing newline runs it).
     /// This is the single place the restore mechanism lives, so it can be
     /// swapped for a command-script launcher without touching callers.
