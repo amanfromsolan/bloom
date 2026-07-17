@@ -180,9 +180,7 @@ final class TerminalSessionStore: ObservableObject {
     /// it (#28), so "another terminal for this project" is one keystroke.
     var selectionFolder: TerminalFolder? {
         guard let selection else { return nil }
-        return spaces
-            .flatMap(\.pinnedFolders)
-            .first { $0.sessions.contains { $0.id == selection } }
+        return spaces.lazy.compactMap { $0.folder(containing: selection) }.first
     }
 
     // MARK: - Creation
@@ -610,7 +608,6 @@ final class TerminalSessionStore: ObservableObject {
             TabAutoNamer.shared.noteActivity(sessionID)
         }
         surfaceView.onPwdChange = { [weak self] pwd in
-            NSLog("TerminalSessionStore: pwd -> %@", pwd)
             self?.updateWorkingDirectory(sessionID, to: pwd)
             TabAutoNamer.shared.noteActivity(sessionID)
         }
@@ -672,10 +669,7 @@ final class TerminalSessionStore: ObservableObject {
     /// ⇧⌘R: inline-rename the selected tab's folder, or the tab when loose.
     func requestRenameOfSelectionContainer() {
         guard let selection else { return }
-        let folder = spaces
-            .flatMap(\.pinnedFolders)
-            .first { $0.sessions.contains { $0.id == selection } }
-        renameRequest = folder.map { .folder($0.id) } ?? .session(selection)
+        renameRequest = selectionFolder.map { .folder($0.id) } ?? .session(selection)
     }
 
 
@@ -698,13 +692,22 @@ final class TerminalSessionStore: ObservableObject {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let display = Self.displayTitle(fromShellTitle: trimmed)
+        // Alias-proof detection needs every event, even ones that change
+        // nothing here, so schedule it before the no-op bail.
+        scheduleForegroundProcessCheck(for: sessionID)
+        // Compute first, publish only on change: agents retitle every few
+        // seconds, and a repeat event must not touch @Published state or
+        // re-encode the state file.
+        guard let session = sessions.first(where: { $0.id == sessionID }) else { return }
+        // Process detection reads the raw title; only the display collapses.
+        let detected = TabProcess.detect(after: session.runningProcess, title: trimmed)
+        let displayLands = session.titleOrigin == .shell && session.title != display
+        guard detected != session.runningProcess || displayLands else { return }
         update(sessionID) { item in
-            // Process detection reads the raw title; only the display collapses.
-            item.runningProcess = TabProcess.detect(after: item.runningProcess, title: trimmed)
+            item.runningProcess = detected
             guard item.titleOrigin == .shell, item.title != display else { return }
             item.title = display
         }
-        scheduleForegroundProcessCheck(for: sessionID)
         save()
     }
 
@@ -781,8 +784,11 @@ final class TerminalSessionStore: ObservableObject {
     /// Persisted, so a restored session's surface respawns where it left off.
     func updateWorkingDirectory(_ sessionID: TerminalSession.ID, to path: String) {
         guard !path.isEmpty else { return }
+        // Shells re-report the cwd on every prompt; only an actual move gets
+        // published and persisted.
+        guard let session = sessions.first(where: { $0.id == sessionID }),
+              session.workingDirectory != path else { return }
         update(sessionID) { item in
-            guard item.workingDirectory != path else { return }
             item.workingDirectory = path
         }
         rememberWorkingDirectory(path, forFolderContaining: sessionID)
@@ -963,7 +969,7 @@ final class TerminalSessionStore: ObservableObject {
         var ephemeralSessions: [TerminalSession]
     }
 
-    private static var stateURL: URL {
+    private static let stateURL: URL = {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         // Per-build-identity folder (debug builds get "Enso Dev", the Next
         // channel gets "Enso Next") so a dev or Next build running alongside
@@ -988,7 +994,7 @@ final class TerminalSessionStore: ObservableObject {
 
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base.appendingPathComponent("state.json")
-    }
+    }()
 
     private static func loadState() -> PersistedState? {
         guard let data = try? Data(contentsOf: stateURL) else { return nil }

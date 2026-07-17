@@ -142,13 +142,11 @@ final class CommandCenter: ObservableObject {
     // MARK: - Rename modes
 
     private func beginRename() {
-        guard let store, let selection = store.selection,
-              let session = store.sessions.first(where: { $0.id == selection })
-        else {
+        guard let store, let session = store.selectedSession else {
             close()
             return
         }
-        mode = .renameTab(selection)
+        mode = .renameTab(session.id)
         query = session.title
     }
 
@@ -368,7 +366,7 @@ final class CommandCenter: ObservableObject {
 
     /// The sidebar folder a tab lives in, if any.
     private static func folder(of sessionID: TerminalSession.ID, in space: SidebarSpace) -> TerminalFolder? {
-        space.pinnedFolders.first { $0.sessions.contains { $0.id == sessionID } }
+        space.folder(containing: sessionID)
     }
 
     private func spaceItems(in store: TerminalSessionStore) -> [PaletteItem] {
@@ -478,18 +476,27 @@ final class CommandCenter: ObservableObject {
         // default sheet, so the menu carries only the rest.
         var items: [PaletteItem] = []
         if store.selection != nil {
-            items.append(PaletteItem(
-                id: "cmd-auto-rename-tab",
-                icon: .symbol("pencil"),
-                title: "Auto Rename Tab",
-                context: nil,
-                verb: "Run"
-            ) { [weak store] in
-                guard let store, let selection = store.selection else { return }
-                TabAutoNamer.shared.forceName(selection)
-            })
+            items.append(autoRenameTabItem(in: store))
         }
-        items.append(PaletteItem(
+        items.append(settingsItem())
+        return items
+    }
+
+    private func autoRenameTabItem(in store: TerminalSessionStore) -> PaletteItem {
+        PaletteItem(
+            id: "cmd-auto-rename-tab",
+            icon: .symbol("pencil"),
+            title: "Auto Rename Tab",
+            context: nil,
+            verb: "Run"
+        ) { [weak store] in
+            guard let store, let selection = store.selection else { return }
+            TabAutoNamer.shared.forceName(selection)
+        }
+    }
+
+    private func settingsItem() -> PaletteItem {
+        PaletteItem(
             id: "cmd-settings",
             icon: .symbol("gearshape"),
             title: "Settings",
@@ -497,8 +504,7 @@ final class CommandCenter: ObservableObject {
             verb: "Run"
         ) { [weak self] in
             self?.openWindow?(id: SettingsPanel.windowID)
-        })
-        return items
+        }
     }
 
     /// The full path never fits the narrow context column, so show just the
@@ -593,16 +599,7 @@ final class CommandCenter: ObservableObject {
                 self?.beginRename()
             })
 
-            commands.append(PaletteItem(
-                id: "cmd-auto-rename-tab",
-                icon: .symbol("pencil"),
-                title: "Auto Rename Tab",
-                context: nil,
-                verb: "Run"
-            ) { [weak store] in
-                guard let store, let selection = store.selection else { return }
-                TabAutoNamer.shared.forceName(selection)
-            })
+            commands.append(autoRenameTabItem(in: store))
 
             commands.append(PaletteItem(
                 id: "cmd-duplicate-tab",
@@ -611,10 +608,8 @@ final class CommandCenter: ObservableObject {
                 context: nil,
                 verb: "Open"
             ) { [weak store] in
-                guard let store, let selection = store.selection,
-                      let current = store.sessions.first(where: { $0.id == selection })
-                else { return }
-                store.createSession(workingDirectory: current.workingDirectory)
+                guard let store, let session = store.selectedSession else { return }
+                store.createSession(workingDirectory: session.workingDirectory)
             })
 
             let pinned = store.isPinned(selection)
@@ -663,9 +658,7 @@ final class CommandCenter: ObservableObject {
                 context: nil,
                 verb: "Copy"
             ) { [weak store] in
-                guard let store, let selection = store.selection,
-                      let session = store.sessions.first(where: { $0.id == selection })
-                else { return }
+                guard let session = store?.selectedSession else { return }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(session.workingDirectory, forType: .string)
             })
@@ -677,9 +670,7 @@ final class CommandCenter: ObservableObject {
                 context: nil,
                 verb: "Open"
             ) { [weak store] in
-                guard let store, let selection = store.selection,
-                      let session = store.sessions.first(where: { $0.id == selection })
-                else { return }
+                guard let session = store?.selectedSession else { return }
                 NSWorkspace.shared.open(URL(fileURLWithPath: session.workingDirectory, isDirectory: true))
             })
 
@@ -719,15 +710,7 @@ final class CommandCenter: ObservableObject {
             store?.isSidebarVisible.toggle()
         })
 
-        commands.append(PaletteItem(
-            id: "cmd-settings",
-            icon: .symbol("gearshape"),
-            title: "Settings",
-            context: nil,
-            verb: "Run"
-        ) { [weak self] in
-            self?.openWindow?(id: SettingsPanel.windowID)
-        })
+        commands.append(settingsItem())
 
         return commands
     }
@@ -764,11 +747,10 @@ final class CommandCenter: ObservableObject {
 
 struct PaletteItem: Identifiable {
     enum Icon {
-        case accent(Color)
         case space(SidebarSpace.Icon)
         case symbol(String)
         /// Detected foreground process on a tab row; renders its badge in
-        /// place of the accent dot.
+        /// the icon slot.
         case process(TabProcess)
         /// Idle tab: the terminal glyph, tinted like the row's other marks.
         case idleTerminal
@@ -910,22 +892,56 @@ struct CommandCenterView: View {
     }
 
     private func row(_ item: PaletteItem, at index: Int) -> some View {
-        let isHighlighted = index == center.highlightedIndex
+        PaletteRowView(
+            icon: item.icon,
+            title: item.title,
+            kindLabel: item.kindLabel,
+            context: item.context,
+            showsFolderGlyph: item.contextSymbol != nil,
+            isHighlighted: index == center.highlightedIndex
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if hovering {
+                center.highlightedIndex = index
+            }
+        }
+        .onTapGesture {
+            center.execute(index)
+        }
+    }
+}
 
-        return HStack(spacing: 14) {
-            iconView(item.icon, isHighlighted: isHighlighted)
+// MARK: - Shared palette chrome
+
+/// One result row — icon slot, title, and trailing context — shared by the
+/// ⌘T palette and the Ctrl-Tab HUD. Hover and tap handling stay at the
+/// call sites.
+struct PaletteRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let icon: PaletteItem.Icon
+    let title: String
+    var kindLabel: String? = nil
+    var context: String? = nil
+    var showsFolderGlyph: Bool = false
+    let isHighlighted: Bool
+
+    var body: some View {
+        HStack(spacing: 14) {
+            iconView
                 .frame(width: 20, alignment: .center)
 
             HStack(spacing: 8) {
-                Text(item.title)
-                    .font(compactDisplay(16))
+                Text(title)
+                    .font(display(16))
                     .tracking(PaletteFont.tracking)
                     .foregroundStyle(Theme.text(isHighlighted ? 0.98 : 0.85))
                     .lineLimit(1)
 
-                if let kind = item.kindLabel {
-                    Text(kind)
-                        .font(compactDisplay(16))
+                if let kindLabel {
+                    Text(kindLabel)
+                        .font(display(16))
                         .tracking(PaletteFont.tracking)
                         .foregroundStyle(Theme.text(0.28))
                         .lineLimit(1)
@@ -934,14 +950,14 @@ struct CommandCenterView: View {
 
             Spacer(minLength: 16)
 
-            if let context = item.context {
+            if let context {
                 HStack(spacing: 6) {
                     Text(context)
-                        .font(compactText(15))
+                        .font(text(15))
                         .tracking(PaletteFont.tracking)
                         .foregroundStyle(Theme.text(isHighlighted ? 0.5 : 0.38))
                         .lineLimit(1)
-                    if item.contextSymbol != nil {
+                    if showsFolderGlyph {
                         // The only context symbol today is the folder hint;
                         // drawn with the custom glyph so it matches the
                         // sidebar's folder rows.
@@ -961,24 +977,19 @@ struct CommandCenterView: View {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .fill(isHighlighted ? Theme.ink.opacity(0.1) : Color.clear)
         )
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            if hovering {
-                center.highlightedIndex = index
-            }
-        }
-        .onTapGesture {
-            center.execute(index)
-        }
+    }
+
+    private func display(_ size: CGFloat) -> Font {
+        PaletteFont.display(size, Font.Weight.regular.bumped(for: colorScheme))
+    }
+
+    private func text(_ size: CGFloat) -> Font {
+        PaletteFont.text(size, Font.Weight.regular.bumped(for: colorScheme))
     }
 
     @ViewBuilder
-    private func iconView(_ icon: PaletteItem.Icon, isHighlighted: Bool) -> some View {
+    private var iconView: some View {
         switch icon {
-        case .accent(let color):
-            Circle()
-                .fill(color.opacity(isHighlighted ? 1 : 0.9))
-                .frame(width: 9, height: 9)
         case .process(let process):
             RowProcessBadge(process: process, isHighlighted: isHighlighted)
         case .idleTerminal:
@@ -1010,8 +1021,6 @@ struct CommandCenterView: View {
         }
     }
 }
-
-// MARK: - Shared palette chrome
 
 /// System font (SF Pro) for palette and chrome typography. The system face
 /// is a real variable font: weights track the wght axis and Text/Display

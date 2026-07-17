@@ -465,13 +465,25 @@ private struct SpacePage: View {
             if headerHovered && !isRenamingSpace {
                 // Collapse/expand-all toggle, left of the ⋯ menu. Only present
                 // when the space has folders to fold; laid out alongside the
-                // menu so the header height never shifts.
+                // menu so the header height never shifts. Shows the inward
+                // chevrons while any folder is open (click folds everything)
+                // and flips to the outward chevrons once all are folded (click
+                // reopens). Custom template assets so they tint like the
+                // neighboring SF Symbols.
                 if !space.pinnedFolders.isEmpty {
-                    FolderFoldToggle(
-                        collapsed: allFoldersCollapsed,
-                        onCollapse: { store.collapseAllFolders(inSpace: space.id) },
-                        onExpand: { store.expandAllFolders(inSpace: space.id) }
-                    )
+                    HoverIconButton(
+                        help: allFoldersCollapsed ? "Expand All Folders" : "Collapse All Folders",
+                        action: {
+                            if allFoldersCollapsed {
+                                store.expandAllFolders(inSpace: space.id)
+                            } else {
+                                store.collapseAllFolders(inSpace: space.id)
+                            }
+                        }
+                    ) {
+                        Image(allFoldersCollapsed ? "ExpandFolders" : "CollapseFolders")
+                            .renderingMode(.template)
+                    }
                 }
 
                 Menu {
@@ -910,8 +922,16 @@ private struct SpacePage: View {
 
             Spacer(minLength: 0)
             if hoveredSessionID == session.id && !isRenaming {
-                SessionCloseButton {
-                    store.close(sessionID: session.id)
+                // Hover-revealed × on the tab row.
+                HoverIconButton(
+                    help: "Close Tab",
+                    size: 16,
+                    idleTint: 0.5,
+                    washOpacity: 0.14,
+                    action: { store.close(sessionID: session.id) }
+                ) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
                 }
             } else if session.status == .attention {
                 Circle()
@@ -1300,9 +1320,8 @@ private struct SpacePage: View {
             var landedFolderID: TerminalFolder.ID?
             if case .tabs(let ids) = payload, let first = ids.first {
                 landedFolderID = store.spaces
-                    .flatMap(\.pinnedFolders)
-                    .first { $0.sessions.contains { $0.id == first } }?
-                    .id
+                    .compactMap { $0.folder(containing: first) }
+                    .first?.id
             }
             if let landedFolderID {
                 _ = store.collapsedFolderIDs.remove(landedFolderID)
@@ -1312,23 +1331,43 @@ private struct SpacePage: View {
     }
 }
 
-/// 18×18 icon button with its own hover wash so the click target reads
-/// before the mouse commits.
-private struct HoverIconButton: View {
-    let systemName: String
+/// Icon button with its own hover wash so the click target reads before the
+/// mouse commits. Defaults to the 18×18 frame the header icons share; the
+/// label is arbitrary content so custom template assets and resized glyphs
+/// fit the same treatment.
+private struct HoverIconButton<Label: View>: View {
     let help: String
+    let size: CGFloat
+    let idleTint: Double
+    let washOpacity: Double
     let action: () -> Void
+    let label: Label
     @State private var isHovered = false
+
+    init(
+        help: String,
+        size: CGFloat = 18,
+        idleTint: Double = 0.55,
+        washOpacity: Double = 0.12,
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Label
+    ) {
+        self.help = help
+        self.size = size
+        self.idleTint = idleTint
+        self.washOpacity = washOpacity
+        self.action = action
+        self.label = label()
+    }
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Theme.text(isHovered ? 0.9 : 0.55))
-                .frame(width: 18, height: 18)
+            label
+                .foregroundStyle(Theme.text(isHovered ? 0.9 : idleTint))
+                .frame(width: size, height: size)
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(Theme.ink.opacity(isHovered ? 0.12 : 0))
+                        .fill(Theme.ink.opacity(isHovered ? washOpacity : 0))
                 )
                 .contentShape(Rectangle())
         }
@@ -1338,32 +1377,15 @@ private struct HoverIconButton: View {
     }
 }
 
-/// Collapse/expand-all-folders toggle for the space header. Shows the inward
-/// chevrons while any folder is open (click folds everything) and flips to the
-/// outward chevrons once all are folded (click reopens). Custom template
-/// assets so they tint like the neighboring SF Symbols; same 18pt frame and
-/// hover wash as HoverIconButton.
-private struct FolderFoldToggle: View {
-    let collapsed: Bool
-    let onCollapse: () -> Void
-    let onExpand: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: collapsed ? onExpand : onCollapse) {
-            Image(collapsed ? "ExpandFolders" : "CollapseFolders")
-                .renderingMode(.template)
-                .foregroundStyle(Theme.text(isHovered ? 0.9 : 0.55))
-                .frame(width: 18, height: 18)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Theme.ink.opacity(isHovered ? 0.12 : 0))
-                )
-                .contentShape(Rectangle())
+extension HoverIconButton where Label == AnyView {
+    /// SF Symbol shorthand at the shared header glyph size.
+    init(systemName: String, help: String, action: @escaping () -> Void) {
+        self.init(help: help, action: action) {
+            AnyView(
+                Image(systemName: systemName)
+                    .font(.system(size: 10, weight: .semibold))
+            )
         }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .help(collapsed ? "Expand All Folders" : "Collapse All Folders")
     }
 }
 
@@ -1533,31 +1555,6 @@ struct RenameClickAway: NSViewRepresentable {
         }
     }
 }
-
-/// Hover-revealed × on a tab row; its own hover highlight so the click
-/// target reads before the mouse commits.
-private struct SessionCloseButton: View {
-    let action: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "xmark")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(Theme.text(isHovered ? 0.9 : 0.5))
-                .frame(width: 16, height: 16)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Theme.ink.opacity(isHovered ? 0.14 : 0))
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .help("Close Tab")
-    }
-}
-
 
 // MARK: - Space indicators
 
@@ -1759,10 +1756,8 @@ struct SpaceEditorSheet: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .onHover { inside in
-                closeHovered = inside
-                inside ? NSCursor.arrow.push() : NSCursor.pop()
-            }
+            .onHover { closeHovered = $0 }
+            .arrowCursorOnHover()
             .padding(10)
         }
         // Fully owned chrome: presented as an in-window overlay, not a
@@ -2155,10 +2150,8 @@ private struct PickerTileStyle: ButtonStyle {
                 // Pressing brings the hovered swell back down to rest, so the
                 // click reads as a push into the grid.
                 .scaleEffect(configuration.isPressed ? 1 : (hovering ? 1.04 : 1))
-                .onHover { inside in
-                    hovering = inside
-                    inside ? NSCursor.arrow.push() : NSCursor.pop()
-                }
+                .onHover { hovering = $0 }
+                .arrowCursorOnHover()
                 .animation(.snappy(duration: 0.12), value: configuration.isPressed)
                 .animation(.easeInOut(duration: 0.14), value: hovering)
         }
@@ -2282,10 +2275,8 @@ struct ModalPrimaryButtonStyle: ButtonStyle {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .fill((accent ?? Theme.ink).opacity(fillOpacity))
                 )
-                .onHover { inside in
-                    hovering = inside
-                    inside ? NSCursor.arrow.push() : NSCursor.pop()
-                }
+                .onHover { hovering = $0 }
+                .arrowCursorOnHover()
                 .animation(.snappy(duration: 0.12), value: configuration.isPressed)
         }
     }
@@ -2313,10 +2304,8 @@ struct ModalSecondaryButtonStyle: ButtonStyle {
                             configuration.isPressed ? 0.16 : (hovering ? 0.13 : 0.09)
                         ))
                 )
-                .onHover { inside in
-                    hovering = inside
-                    inside ? NSCursor.arrow.push() : NSCursor.pop()
-                }
+                .onHover { hovering = $0 }
+                .arrowCursorOnHover()
                 .animation(.snappy(duration: 0.12), value: configuration.isPressed)
         }
     }

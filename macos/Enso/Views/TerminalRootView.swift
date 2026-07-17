@@ -28,14 +28,7 @@ struct TerminalRootView: View {
     var body: some View {
         HStack(spacing: 0) {
             if store.isSidebarVisible {
-                VStack(spacing: 0) {
-                    // Clear space for the traffic lights.
-                    Color.clear.frame(height: 40)
-
-                    SidebarView(store: store, spaceEditor: $spaceEditor)
-                }
-                .saturation(isWindowInactive ? 0 : 1)
-                .opacity(isWindowInactive ? 0.6 : 1)
+                sidebarColumn
                 // Drags the window, double-click zooms like a real titlebar.
                 // Handled in AppKit (see WindowDragHandle) because SwiftUI's
                 // WindowDragGesture starves a paired double-click tap. An
@@ -46,7 +39,6 @@ struct TerminalRootView: View {
                 .overlay(alignment: .top) {
                     WindowDragHandle().frame(height: 40)
                 }
-                .frame(width: store.sidebarWidth)
                 // Drag the trailing edge to resize. The handle spans the full
                 // height and insets its own hit strip below the top 40pt so it
                 // never steals the window-drag strip up in the traffic-light
@@ -201,16 +193,7 @@ struct TerminalRootView: View {
         // card and dimming scrim ourselves.
         .overlay {
             if let mode = spaceEditor {
-                ZStack {
-                    Color.black.opacity(0.5)
-                        .contentShape(Rectangle())
-                        .onTapGesture { dismissSpaceEditor() }
-                        .ignoresSafeArea()
-                        .transition(.asymmetric(
-                            insertion: .opacity.animation(.easeOut(duration: 0.16)),
-                            removal: .opacity.animation(.easeOut(duration: 0.07))
-                        ))
-
+                OwnedModalOverlay(onDismiss: dismissSpaceEditor) {
                     SpaceEditorSheet(mode: mode) { name, icon in
                         switch mode {
                         case .create:
@@ -221,16 +204,6 @@ struct TerminalRootView: View {
                     } onDismiss: {
                         dismissSpaceEditor()
                     }
-                    // Pops in sharpening from a blur while scaling up;
-                    // leaves with a near-instant fade.
-                    .transition(.asymmetric(
-                        insertion: .modifier(
-                            active: ModalPopEffect(progress: 0),
-                            identity: ModalPopEffect(progress: 1)
-                        )
-                        .animation(.spring(duration: 0.18, bounce: 0.24)),
-                        removal: .opacity.animation(.easeOut(duration: 0.07))
-                    ))
                 }
             }
         }
@@ -243,16 +216,7 @@ struct TerminalRootView: View {
         // version's notes, no update buttons.
         .overlay {
             if updateController.isShowingWhatsNew, let notes = updateController.presentedWhatsNewNotes {
-                ZStack {
-                    Color.black.opacity(0.5)
-                        .contentShape(Rectangle())
-                        .onTapGesture { dismissWhatsNew() }
-                        .ignoresSafeArea()
-                        .transition(.asymmetric(
-                            insertion: .opacity.animation(.easeOut(duration: 0.16)),
-                            removal: .opacity.animation(.easeOut(duration: 0.07))
-                        ))
-
+                OwnedModalOverlay(onDismiss: dismissWhatsNew) {
                     WhatsNewSheet(
                         content: notes,
                         isUpdatePending: updateController.whatsNewMode == .pendingUpdate
@@ -265,14 +229,6 @@ struct TerminalRootView: View {
                     } onDismiss: {
                         dismissWhatsNew()
                     }
-                    .transition(.asymmetric(
-                        insertion: .modifier(
-                            active: ModalPopEffect(progress: 0),
-                            identity: ModalPopEffect(progress: 1)
-                        )
-                        .animation(.spring(duration: 0.18, bounce: 0.24)),
-                        removal: .opacity.animation(.easeOut(duration: 0.07))
-                    ))
                 }
             }
         }
@@ -314,29 +270,37 @@ struct TerminalRootView: View {
         GhosttySurfaceManager.shared.restoreFocus(to: store.selection)
     }
 
-    /// The hidden sidebar shown as an overlay while the left edge is hovered.
-    private var peekSidebar: some View {
+    /// The sidebar column shared by the docked and peeked presentations:
+    /// traffic-light clearance, the sidebar itself, the inactive-window dim,
+    /// and the panel width.
+    private var sidebarColumn: some View {
         VStack(spacing: 0) {
-            // Breathing room under the floating traffic lights.
+            // Clear space for the traffic lights.
             Color.clear.frame(height: 40)
+
             SidebarView(store: store, spaceEditor: $spaceEditor)
         }
         .saturation(isWindowInactive ? 0 : 1)
         .opacity(isWindowInactive ? 0.6 : 1)
         .frame(width: store.sidebarWidth)
-        .frame(maxHeight: .infinity)
-        .background(
-            // Same tint the pinned sidebar sits on, so pinning from a peek
-            // doesn't shift the panel's brightness.
-            SidebarMaterial()
-                .overlay(Theme.windowWash)
-        )
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(Theme.ink.opacity(0.08))
-                .frame(width: 1)
-        }
-        .shadow(color: .black.opacity(0.45), radius: 30, x: 10)
+    }
+
+    /// The hidden sidebar shown as an overlay while the left edge is hovered.
+    private var peekSidebar: some View {
+        sidebarColumn
+            .frame(maxHeight: .infinity)
+            .background(
+                // Same tint the pinned sidebar sits on, so pinning from a peek
+                // doesn't shift the panel's brightness.
+                SidebarMaterial()
+                    .overlay(Theme.windowWash)
+            )
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(Theme.ink.opacity(0.08))
+                    .frame(width: 1)
+            }
+            .shadow(color: .black.opacity(0.45), radius: 30, x: 10)
     }
 
     private func restoreSelection() {
@@ -349,6 +313,43 @@ struct TerminalRootView: View {
         }
 
         store.selection = id
+    }
+}
+
+/// Scaffold for owned in-window modals: a dimming scrim that dismisses on
+/// tap, with the sheet content layered above it.
+private struct OwnedModalOverlay<Content: View>: View {
+    let onDismiss: () -> Void
+    let content: Content
+
+    init(onDismiss: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+        self.onDismiss = onDismiss
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.5)
+                .contentShape(Rectangle())
+                .onTapGesture { onDismiss() }
+                .ignoresSafeArea()
+                .transition(.asymmetric(
+                    insertion: .opacity.animation(.easeOut(duration: 0.16)),
+                    removal: .opacity.animation(.easeOut(duration: 0.07))
+                ))
+
+            // Pops in sharpening from a blur while scaling up;
+            // leaves with a near-instant fade.
+            content
+                .transition(.asymmetric(
+                    insertion: .modifier(
+                        active: ModalPopEffect(progress: 0),
+                        identity: ModalPopEffect(progress: 1)
+                    )
+                    .animation(.spring(duration: 0.18, bounce: 0.24)),
+                    removal: .opacity.animation(.easeOut(duration: 0.07))
+                ))
+        }
     }
 }
 

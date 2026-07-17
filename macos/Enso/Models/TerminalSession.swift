@@ -98,6 +98,11 @@ struct SidebarSpace: Identifiable, Hashable, Codable {
         } + ephemeralSessions
     }
 
+    /// The pinned folder the given session is filed under, if any.
+    func folder(containing sessionID: TerminalSession.ID) -> TerminalFolder? {
+        pinnedFolders.first { $0.sessions.contains { $0.id == sessionID } }
+    }
+
     /// Mutates the folder with the given ID in place; returns whether it
     /// was found.
     @discardableResult
