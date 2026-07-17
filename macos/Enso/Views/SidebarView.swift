@@ -747,6 +747,7 @@ private struct SpacePage: View {
                     )
             )
             .contentShape(Rectangle())
+            .modifier(RowPressScale())
             .onHover { hovering in
                 if hovering {
                     hoveredFolderID = folder.id
@@ -925,6 +926,7 @@ private struct SpacePage: View {
             )
         )
         .contentShape(Rectangle())
+        .modifier(RowPressScale())
         .onHover { hovering in
             if hovering {
                 hoveredSessionID = session.id
@@ -2169,6 +2171,40 @@ private struct IconDiscButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.98 : (hovered ? 1.05 : 1))
             .animation(.snappy(duration: 0.12), value: configuration.isPressed)
             .animation(.easeInOut(duration: 0.14), value: hovered)
+    }
+}
+
+/// Pressed feel for sidebar rows: dips to 0.98 while the mouse is down and
+/// springs back on release. Tracked with a zero-distance drag held in
+/// `@GestureState`, so the scale resets the instant the pointer moves or the
+/// system cancels the gesture (a drag-to-reorder taking over) — the dip never
+/// follows a drag.
+private struct RowPressScale: ViewModifier {
+    /// One-way press tracking: `began` on the first event, `released` once
+    /// the pointer strays past the threshold. Wandering back over the press
+    /// point never re-engages the dip; `@GestureState` clears both on end or
+    /// cancel.
+    private struct PressState {
+        var began = false
+        var released = false
+    }
+
+    @GestureState private var press = PressState()
+
+    func body(content: Content) -> some View {
+        let pressed = press.began && !press.released
+        return content
+            .scaleEffect(pressed ? 0.98 : 1)
+            .animation(.snappy(duration: 0.12), value: pressed)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($press) { value, state, _ in
+                        state.began = true
+                        if hypot(value.translation.width, value.translation.height) >= 2 {
+                            state.released = true
+                        }
+                    }
+            )
     }
 }
 
