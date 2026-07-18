@@ -112,12 +112,15 @@ struct SettingsPanelView: View {
     // MARK: - Content
 
     private var contentPane: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                Text(panel.section.title)
-                    .font(.system(size: 19, weight: .semibold))
-                    .padding(.bottom, -4)
+        // Native grouped form: sections render as inset rounded cards with
+        // system row metrics, separators, and dark-mode handling for free.
+        VStack(alignment: .leading, spacing: 0) {
+            Text(panel.section.title)
+                .font(.system(size: 19, weight: .semibold))
+                .padding(.horizontal, 28)
+                .padding(.top, 24)
 
+            Form {
                 switch panel.section {
                 case .general: GeneralSettings()
                 case .appearance: AppearanceSettings()
@@ -125,8 +128,8 @@ struct SettingsPanelView: View {
                 case .keyboard: KeyboardSettings()
                 }
             }
-            .padding(28)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
         }
         .frame(maxWidth: .infinity)
     }
@@ -172,45 +175,33 @@ private struct GeneralSettings: View {
     @AppStorage("confirmCloseTabs") private var confirmClose = true
 
     var body: some View {
-        SettingsGroup("Startup") {
-            SettingsRow(
-                "Restore previous session",
-                caption: "Reopen your spaces and tabs where you left off."
-            ) {
-                Toggle("", isOn: $restoreSession)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .labelsHidden()
+        Section("Startup") {
+            Toggle(isOn: $restoreSession) {
+                Text("Restore previous session")
+                Text("Reopen your spaces and tabs where you left off.")
             }
         }
 
-        SettingsGroup("New tabs") {
-            SettingsRow(
-                "New tabs open in",
-                caption: "Where a fresh terminal starts."
-            ) {
-                Picker("", selection: $newTabDirectory) {
-                    Text("Home folder").tag("home")
-                    Text("Current tab's folder").tag("inherit")
-                }
-                .labelsHidden()
-                .fixedSize()
+        Section("New tabs") {
+            Picker(selection: $newTabDirectory) {
+                Text("Home folder").tag("home")
+                Text("Current tab's folder").tag("inherit")
+            } label: {
+                Text("New tabs open in")
+                Text("Where a fresh terminal starts.")
             }
         }
 
-        SettingsGroup("Closing") {
-            SettingsRow(
-                "Confirm before closing tabs",
-                caption: "Ask when a tab still has a process running."
-            ) {
-                Toggle("", isOn: $confirmClose)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .labelsHidden()
+        Section {
+            Toggle(isOn: $confirmClose) {
+                Text("Confirm before closing tabs")
+                Text("Ask when a tab still has a process running.")
             }
+        } header: {
+            Text("Closing")
+        } footer: {
+            PreviewFootnote()
         }
-
-        PreviewFootnote()
     }
 }
 
@@ -226,36 +217,30 @@ private struct AppearanceSettings: View {
     }
 
     var body: some View {
-        SettingsGroup("Theme") {
-            SettingsRow(
-                "Appearance",
-                caption: "The app chrome follows this; the terminal keeps its Ghostty theme."
-            ) {
+        Section("Theme") {
+            LabeledContent {
                 AppearanceSegments(selectedRaw: appearanceRaw)
+            } label: {
+                Text("Appearance")
+                Text("The app chrome follows this; the terminal keeps its Ghostty theme.")
             }
         }
 
-        SettingsGroup("Text") {
-            SettingsRow(
-                "Font smoothing",
-                caption: "Thickens small light-on-dark text. Takes effect after relaunch."
-            ) {
-                Toggle("", isOn: smoothingOn)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .labelsHidden()
+        Section("Text") {
+            Toggle(isOn: smoothingOn) {
+                Text("Font smoothing")
+                Text("Thickens small light-on-dark text. Takes effect after relaunch.")
             }
         }
 
-        SettingsGroup("Terminal theme") {
-            SettingsRow(
-                "Follows your Ghostty config",
-                caption: "Fonts, colors, and theme come from Ghostty's config file. Changes apply on relaunch."
-            ) {
+        Section("Terminal theme") {
+            LabeledContent {
                 Button("Edit config") {
                     editGhosttyConfig()
                 }
-                .controlSize(.small)
+            } label: {
+                Text("Follows your Ghostty config")
+                Text("Fonts, colors, and theme come from Ghostty's config file. Changes apply on relaunch.")
             }
         }
     }
@@ -303,49 +288,35 @@ private struct TabsSettings: View {
     @State private var namingChoice = TabAutoNamer.presetCommands[0].name
 
     var body: some View {
-        SettingsGroup("Tab naming") {
-            SettingsRow(
-                "Name tabs automatically",
-                caption: "Names each new tab from its first command. Renaming a tab yourself always wins."
-            ) {
-                Toggle("", isOn: $namingEnabled)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .labelsHidden()
+        Section {
+            Toggle(isOn: $namingEnabled) {
+                Text("Name tabs automatically")
+                Text("Names each new tab from its first command. Renaming a tab yourself always wins.")
             }
 
             if namingEnabled {
-                SettingsRow(
-                    "Naming command",
-                    caption: "Runs in a login shell: prompt on stdin, tab name on stdout."
-                ) {
-                    Picker("", selection: $namingChoice) {
-                        ForEach(TabAutoNamer.presetCommands, id: \.name) { preset in
-                            Text(preset.name).tag(preset.name)
-                        }
-                        Text(Self.customChoice).tag(Self.customChoice)
+                Picker(selection: $namingChoice) {
+                    ForEach(TabAutoNamer.presetCommands, id: \.name) { preset in
+                        Text(preset.name).tag(preset.name)
                     }
-                    .labelsHidden()
-                    .fixedSize()
-                    .onChange(of: namingChoice) { _, choice in
-                        if let preset = TabAutoNamer.presetCommands.first(where: { $0.name == choice }) {
-                            namingCommand = preset.command
-                        }
+                    Text(Self.customChoice).tag(Self.customChoice)
+                } label: {
+                    Text("Naming command")
+                    Text("Runs in a login shell: prompt on stdin, tab name on stdout.")
+                }
+                .onChange(of: namingChoice) { _, choice in
+                    if let preset = TabAutoNamer.presetCommands.first(where: { $0.name == choice }) {
+                        namingCommand = preset.command
                     }
                 }
 
                 if namingChoice == Self.customChoice {
                     TextField("claude -p --model haiku", text: $namingCommand)
-                        .textFieldStyle(.plain)
                         .font(.system(size: 12, design: .monospaced))
-                        .padding(.vertical, 7)
-                        .padding(.horizontal, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Theme.ink.opacity(0.06))
-                        )
                 }
             }
+        } header: {
+            Text("Tab naming")
         }
         .onAppear {
             let current = namingCommand.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -358,58 +329,48 @@ private struct TabsSettings: View {
             }
         }
 
-        SettingsGroup("Temporary tabs") {
-            SettingsRow(
-                "Close unpinned tabs after",
-                caption: "Tabs below the sidebar divider are temporary. Pin a tab (drag it above the divider) to keep it forever."
-            ) {
-                Picker("", selection: $ephemeralTTLHours) {
-                    Text("12 hours").tag(12)
-                    Text("24 hours").tag(24)
-                    Text("48 hours").tag(48)
-                    Text("Never").tag(0)
-                }
-                .labelsHidden()
-                .fixedSize()
+        Section("Temporary tabs") {
+            Picker(selection: $ephemeralTTLHours) {
+                Text("12 hours").tag(12)
+                Text("24 hours").tag(24)
+                Text("48 hours").tag(48)
+                Text("Never").tag(0)
+            } label: {
+                Text("Close unpinned tabs after")
+                Text("Tabs below the sidebar divider are temporary. Pin a tab to keep it forever.")
             }
         }
 
-        SettingsGroup("Agents") {
-            SettingsRow(
-                "Resume agent sessions on relaunch",
-                caption: "A tab that was running claude or codex when you quit picks its conversation back up. Takes effect for new tabs."
-            ) {
-                Toggle("", isOn: $resumeAgentSessions)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .labelsHidden()
+        Section {
+            Toggle(isOn: $resumeAgentSessions) {
+                Text("Resume agent sessions on relaunch")
+                Text("A tab that was running claude or codex when you quit picks its conversation back up.")
             }
 
             if resumeAgentSessions {
-                SettingsRow("When Enso opens…", caption: wakeCaption) {
-                    Picker("", selection: $agentWakePolicy) {
-                        Text("Wake as I visit").tag(TerminalSessionStore.AgentWakePolicy.onVisit)
-                        Text("Wake recent tabs").tag(TerminalSessionStore.AgentWakePolicy.recent)
-                        Text("Wake everything").tag(TerminalSessionStore.AgentWakePolicy.all)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
+                Picker("When Enso opens…", selection: $agentWakePolicy) {
+                    Text("Wake as I visit").tag(TerminalSessionStore.AgentWakePolicy.onVisit)
+                    Text("Wake recent tabs first").tag(TerminalSessionStore.AgentWakePolicy.recent)
+                    Text("Wake everything").tag(TerminalSessionStore.AgentWakePolicy.all)
                 }
 
                 if agentWakePolicy == .recent {
-                    SettingsRow(
-                        "Tabs to wake right away",
-                        caption: "Most recent first, counted across the whole launch."
-                    ) {
-                        Stepper(value: $agentWakeRecentCount, in: 1...20) {
+                    LabeledContent("Tabs to wake right away") {
+                        HStack(spacing: 8) {
                             Text("\(agentWakeRecentCount)")
-                                .font(.system(size: 13).monospacedDigit())
-                                .frame(minWidth: 22, alignment: .trailing)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                            Stepper("", value: $agentWakeRecentCount, in: 1...20)
+                                .labelsHidden()
                         }
-                        .fixedSize()
                     }
                 }
+            }
+        } header: {
+            Text("Agents")
+        } footer: {
+            if resumeAgentSessions {
+                Text(wakeCaption)
             }
         }
     }
@@ -422,7 +383,7 @@ private struct TabsSettings: View {
         case .onVisit:
             "Sleeping agent tabs wear a tinted badge and wake the moment you click them."
         case .recent:
-            "Your \(agentWakeRecentCount) most recent agent tabs pick up right away. The rest sleep — a tinted badge marks them — and wake when you click."
+            "Your \(agentWakeRecentCount) most recent agent tabs pick up right away; the rest sleep with a tinted badge until you click."
         case .all:
             "Every agent restarts the moment Enso opens — heavier on memory while they all spin up."
         }
@@ -431,7 +392,7 @@ private struct TabsSettings: View {
 
 private struct KeyboardSettings: View {
     var body: some View {
-        SettingsGroup("Navigation") {
+        Section("Navigation") {
             ShortcutRow("Command center", keys: ["⌘", "T"])
             ShortcutRow("Go to tab", keys: ["⌘", "P"])
             ShortcutRow("Switch to recent tab", keys: ["⌃", "⇥"])
@@ -439,20 +400,20 @@ private struct KeyboardSettings: View {
             ShortcutRow("Jump to tab 1–9", keys: ["⌘", "1–9"])
         }
 
-        SettingsGroup("Tabs") {
+        Section("Tabs") {
             ShortcutRow("New tab", keys: ["⇧", "⌘", "T"])
             ShortcutRow("New folder", keys: ["⇧", "⌘", "N"])
             ShortcutRow("Pin / unpin tab", keys: ["⇧", "⌘", "P"])
             ShortcutRow("Close tab", keys: ["⌘", "W"])
         }
 
-        SettingsGroup("App") {
+        Section {
             ShortcutRow("Settings", keys: ["⌘", ","])
+        } header: {
+            Text("App")
+        } footer: {
+            Text("Custom key bindings are coming later.")
         }
-
-        Text("Custom key bindings are coming later.")
-            .font(.system(size: 11.5))
-            .foregroundStyle(Theme.text(0.35))
     }
 }
 
@@ -510,15 +471,29 @@ private struct AppearanceSegments: View {
 /// style: flat, no boxed background.
 private struct SettingsGroup<Content: View>: View {
     let title: String
+    /// Every group but the first in its pane draws a hairline above its
+    /// title, so adjacent groups read as separate sections. Opt-in per call
+    /// site because only the pane knows which group leads.
+    var divided: Bool
     @ViewBuilder let content: Content
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(_ title: String, divided: Bool = false, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.divided = divided
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
+            if divided {
+                // The pane stack already puts 26 above this group; 16 more
+                // below the rule keeps it closer to the section it opens.
+                Rectangle()
+                    .fill(Theme.text(0.07))
+                    .frame(height: 1)
+                    .padding(.bottom, 16)
+            }
+
             Text(title)
                 .font(.system(size: 13.5, weight: .semibold))
                 .foregroundStyle(Theme.text(0.92))
