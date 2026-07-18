@@ -292,7 +292,7 @@ private struct AppearanceSettings: View {
         } header: {
             Text("Theme")
         } footer: {
-            Text("The app chrome follows this; the terminal keeps its Ghostty theme.")
+            Text("This affects your app. The terminal follows your Ghostty theme.")
         }
 
         Section("Text") {
@@ -539,16 +539,12 @@ private struct AppearanceThumbnail: View {
         case .light: pane(dark: false)
         case .dark: pane(dark: true)
         case .system:
-            // One full-width illustration in each scheme, dark masked to
-            // the right half — the split runs through a single left-anchored
-            // drawing instead of cramming two half-width panes (whose bars
-            // would overflow and clip).
-            ZStack {
-                pane(dark: false)
-                pane(dark: true)
-                    .mask(alignment: .trailing) {
-                        Rectangle().frame(width: 32)
-                    }
+            // Two half-width panes, each with its own full-size drawing
+            // pinned to its own left edge; the bars bleed past the half and
+            // each side clips its own overflow at the split.
+            HStack(spacing: 0) {
+                pane(dark: false).clipped()
+                pane(dark: true).clipped()
             }
         }
     }
@@ -573,6 +569,9 @@ private struct AppearanceThumbnail: View {
                 }
             }
             .padding(6)
+            // Content wider than the container (the Auto halves) must hang
+            // off the trailing edge, not center itself in the squeeze.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 }
