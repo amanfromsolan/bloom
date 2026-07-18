@@ -115,7 +115,7 @@ struct SidebarView: View {
             dragOffset = 0
             trailingOverscroll = 0
             if target != currentIndex {
-                store.setActiveSpace(store.spaces[target].id)
+                store.activateSpace(store.spaces[target].id)
             }
         }
     }
@@ -278,6 +278,10 @@ private struct NewSpaceTeaser: View {
 private struct SpacePage: View {
     @ObservedObject var store: TerminalSessionStore
     @ObservedObject private var namer = TabAutoNamer.shared
+    /// Observed so dormant badges track the store live: consumption, tab
+    /// close, the Settings toggle, and launch-time restorability resolution
+    /// all publish, and each re-render re-asks dormantAgent(forTab:) below.
+    @ObservedObject private var agentSessions = AgentSessionStore.shared
     @Environment(\.colorScheme) private var colorScheme
     let space: SidebarSpace
     let onEditSpace: (SidebarSpace) -> Void
@@ -883,12 +887,14 @@ private struct SpacePage: View {
             Group {
                 if let process = session.runningProcess {
                     ProcessBadgeView(process: process, isSelected: isSelected)
-                } else if let dormant = AgentSessionStore.shared.dormantAgent(forTab: session.id) {
+                } else if let dormant = agentSessions.dormantAgent(forTab: session.id) {
                     // An agent session lives here but isn't running yet
                     // (eager sweep hasn't reached it, or it's past the warm
-                    // cap). AgentSessionStore isn't observed; the flip to
-                    // the full-color badge rides on process detection
-                    // updating the session once the resume command runs.
+                    // cap). The badge clears the moment the restore is
+                    // consumed or the Settings toggle flips (the store
+                    // publishes both); the flip to the full-color badge
+                    // rides on process detection updating the session once
+                    // the resume command runs.
                     DormantAgentBadgeView(process: dormant, isSelected: isSelected)
                 } else if namer.namingSessions.contains(session.id) {
                     AutoNamingIndicator()
@@ -1621,7 +1627,7 @@ private struct SpaceIndicatorBar: View {
                 let isHovered = hoveredSpaceID == space.id
                 Button {
                     withAnimation(.spring(duration: 0.32, bounce: 0.12)) {
-                        store.setActiveSpace(space.id)
+                        store.activateSpace(space.id)
                     }
                 } label: {
                     SpaceIndicatorIcon(icon: space.icon, isActive: isActive, size: 18)

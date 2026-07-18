@@ -157,7 +157,7 @@ struct TerminalSessionStoreTests {
 
         // Switching spaces re-aims the sweep: the new space's dormant tabs
         // become the candidates (its remembered selection is skipped).
-        store.setActiveSpace(work.id)
+        store.activateSpace(work.id)
         #expect(store.eagerRestoreCandidates { _ in true }.map(\.id) == [workDormant.id])
     }
 
@@ -182,6 +182,136 @@ struct TerminalSessionStoreTests {
         // stay lazy.
         #expect(candidates.map(\.id)
             == sessions[1...TerminalSessionStore.maxEagerRestores].map(\.id))
+    }
+
+    @Test func equalLastActivityCandidatesRankByStableTieBreaker() throws {
+        let dir = try makeTempDirectory("tiebreak")
+        // tab-0 is selected (its lastActivity is touched on launch, and it
+        // is skipped anyway); every other tab shares ONE lastActivity, so
+        // which of them make the capped warm list is decided purely by the
+        // secondary key — Swift's sort alone is unstable and would make the
+        // cap boundary a coin flip.
+        let stamp = Date.now.addingTimeInterval(-600)
+        let sessions = (0..<(TerminalSessionStore.maxEagerRestores + 3)).map { index in
+            TerminalSession(title: "tab-\(index)", workingDirectory: dir, lastActivity: stamp)
+        }
+        let store = makeStore(
+            folder: TerminalFolder(title: "enso", sessions: sessions),
+            select: sessions[0].id
+        )
+
+        let expected = Array(
+            sessions.dropFirst()
+                .sorted { $0.id.uuidString < $1.id.uuidString }
+                .prefix(TerminalSessionStore.maxEagerRestores)
+                .map(\.id)
+        )
+        #expect(store.eagerRestoreCandidates { _ in true }.map(\.id) == expected)
+        // Reproducible on every ask, not just the first.
+        #expect(store.eagerRestoreCandidates { _ in true }.map(\.id) == expected)
+    }
+
+    // MARK: - Atomic space transitions (#53)
+
+    /// Two spaces with remembered selections and one extra (dormant-able)
+    /// tab each; Home is the launch-active space.
+    private func makeTwoSpaceStore(dir: String) -> (
+        store: TerminalSessionStore,
+        home: SidebarSpace, homeSelected: TerminalSession, homeDormant: TerminalSession,
+        work: SidebarSpace, workSelected: TerminalSession, workDormant: TerminalSession
+    ) {
+        let homeSelected = TerminalSession(title: "home-a", workingDirectory: dir)
+        let homeDormant = TerminalSession(title: "home-b", workingDirectory: dir)
+        let workSelected = TerminalSession(title: "work-a", workingDirectory: dir)
+        let workDormant = TerminalSession(title: "work-b", workingDirectory: dir)
+        let home = SidebarSpace(
+            name: "Home",
+            pinnedFolders: [TerminalFolder(title: "h", sessions: [homeSelected, homeDormant])],
+            lastSelection: homeSelected.id
+        )
+        let work = SidebarSpace(
+            name: "Work",
+            pinnedFolders: [TerminalFolder(title: "w", sessions: [workSelected, workDormant])],
+            lastSelection: workSelected.id
+        )
+        let store = TerminalSessionStore(spaces: [home, work], persistToDisk: false)
+        return (store, home, homeSelected, homeDormant, work, workSelected, workDormant)
+    }
+
+    @Test func deleteActiveSpaceTransitionsToFallbackAndResweeps() throws {
+        let dir = try makeTempDirectory("delete-space")
+        let (store, home, homeSelected, homeDormant, work, _, _) = makeTwoSpaceStore(dir: dir)
+        store.activateSpace(work.id)
+
+        // Record every sweep the transition path schedules, with the
+        // selection it fires against.
+        var sweptSelections: [TerminalSession.ID?] = []
+        store.eagerRestoreSweepOverride = { [weak store] in
+            sweptSelections.append(store?.selection)
+        }
+
+        store.deleteSpace(work.id)
+        // Deleting the active space is a full transition: the fallback
+        // space is active with its remembered selection, and exactly one
+        // sweep was scheduled — after that selection was final.
+        #expect(store.activeSpaceID == home.id)
+        #expect(store.selection == homeSelected.id)
+        #expect(sweptSelections == [homeSelected.id])
+        #expect(store.eagerRestoreCandidates { _ in true }.map(\.id) == [homeDormant.id])
+
+        // Deleting a background space is not a transition; no re-sweep.
+        let scratch = store.createSpace(name: "Scratch", icon: .dot)
+        store.activateSpace(home.id)
+        sweptSelections = []
+        store.deleteSpace(scratch)
+        #expect(store.activeSpaceID == home.id)
+        #expect(sweptSelections.isEmpty)
+    }
+
+    @Test func revealAcrossSpacesAimsTheSweepAtTheFinalSelection() throws {
+        let dir = try makeTempDirectory("reveal")
+        let (store, _, _, _, work, workSelected, workDormant) = makeTwoSpaceStore(dir: dir)
+
+        var sweptSelections: [TerminalSession.ID?] = []
+        store.eagerRestoreSweepOverride = { [weak store] in
+            sweptSelections.append(store?.selection)
+        }
+
+        store.reveal(workDormant.id)
+        // One transition, selection already final when the sweep fires: no
+        // warm slot spent on the tab being opened, and the space's
+        // remembered selection is back in the candidate pool.
+        #expect(store.activeSpaceID == work.id)
+        #expect(store.selection == workDormant.id)
+        #expect(store.multiSelection == [workDormant.id])
+        #expect(sweptSelections == [workDormant.id])
+        #expect(store.eagerRestoreCandidates { _ in true }.map(\.id) == [workSelected.id])
+
+        // Same-space reveal is a selection landing, not a transition.
+        store.reveal(workSelected.id)
+        #expect(store.selection == workSelected.id)
+        #expect(sweptSelections.count == 1)
+    }
+
+    @Test func crossSpaceCreationSelectsTheNewTabBeforeTheSweep() throws {
+        let dir = try makeTempDirectory("cross-create")
+        let (store, _, _, _, work, workSelected, workDormant) = makeTwoSpaceStore(dir: dir)
+
+        var sweptSelections: [TerminalSession.ID?] = []
+        store.eagerRestoreSweepOverride = { [weak store] in
+            sweptSelections.append(store?.selection)
+        }
+
+        store.createSession(inSpace: work.id, workingDirectory: dir)
+        // The new tab — not the target space's remembered selection — is
+        // what the transition's sweep sees as selected.
+        let newID = try #require(store.selection)
+        #expect(store.activeSpaceID == work.id)
+        #expect(newID != workSelected.id)
+        #expect(store.activeSpace.sessions.contains { $0.id == newID })
+        #expect(sweptSelections == [newID])
+        #expect(Set(store.eagerRestoreCandidates { _ in true }.map(\.id))
+            == [workSelected.id, workDormant.id])
     }
 
     // MARK: - Persistence compatibility

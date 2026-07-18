@@ -102,18 +102,42 @@ final class TerminalSessionStore: ObservableObject {
         spaces.first { $0.id == activeSpaceID } ?? spaces[0]
     }
 
-    func setActiveSpace(_ spaceID: SidebarSpace.ID) {
-        guard spaceID != activeSpaceID, spaces.contains(where: { $0.id == spaceID }) else { return }
+    /// THE space-transition path — every caller that changes activeSpaceID
+    /// (space switch, cross-space tab creation, reveal, delete-space
+    /// fallback) goes through here, because the transition's invariants
+    /// only hold when applied as one unit: space and FINAL selection land
+    /// together, the state is saved once, and the eager sweep is scheduled
+    /// last. The sweep ranks and excludes against `selection`, so a caller
+    /// that switched first and selected afterwards would aim it at a
+    /// selection about to change — spending a warm slot on the tab the
+    /// user is about to open anyway, and excluding the wrong one.
+    ///
+    /// `selecting:` nil means "the space's remembered selection", validated
+    /// against its live sessions and falling back to the first tab.
+    /// Activating the already-active space just lands the selection: no
+    /// transition happened, so the sweep isn't re-aimed.
+    func activateSpace(_ spaceID: SidebarSpace.ID, selecting sessionID: TerminalSession.ID? = nil) {
+        guard spaces.contains(where: { $0.id == spaceID }) else { return }
+        if spaceID == activeSpaceID {
+            guard let sessionID else { return }
+            selection = sessionID
+            multiSelection = [sessionID]
+            save()
+            return
+        }
+        // The departing space remembers its selection for the next visit.
+        // After deleteSpace the departing space is already gone and this is
+        // a harmless no-op.
         withSpace(activeSpaceID) { $0.lastSelection = selection }
         activeSpaceID = spaceID
-        selection = activeSpace.lastSelection.flatMap { last in
+        selection = sessionID ?? activeSpace.lastSelection.flatMap { last in
             activeSpace.sessions.contains { $0.id == last } ? last : nil
         } ?? activeSpace.sessions.first?.id
         multiSelection = selection.map { [$0] } ?? []
         save()
         // Warm-up follows the user: drop the old space's unfired restore
         // ticks and sweep the space now in front of them.
-        eagerlyRestoreAgentSessions()
+        scheduleEagerRestoreSweep()
     }
 
     @discardableResult
@@ -125,8 +149,7 @@ final class TerminalSessionStore: ObservableObject {
             ephemeralSessions: [Self.makeSession()]
         )
         spaces.append(space)
-        setActiveSpace(space.id)
-        save()
+        activateSpace(space.id)
         return space.id
     }
 
@@ -156,11 +179,15 @@ final class TerminalSessionStore: ObservableObject {
         }
         spaces.remove(at: index)
         if activeSpaceID == spaceID {
-            let fallback = spaces[min(index, spaces.count - 1)]
-            activeSpaceID = fallback.id
-            selection = fallback.lastSelection ?? fallback.sessions.first?.id
+            // Deleting the active space is a real transition: route it
+            // through activateSpace so the fallback space gets everything a
+            // switch gets — validated remembered selection, one save, and a
+            // fresh eager sweep (which also cancels the deleted space's
+            // unfired restore ticks, whose tabs no longer exist).
+            activateSpace(spaces[min(index, spaces.count - 1)].id)
+        } else {
+            save()
         }
-        save()
     }
 
     // MARK: - Derived collections
@@ -207,12 +234,9 @@ final class TerminalSessionStore: ObservableObject {
         withSpace(targetID) { space in
             space.ephemeralSessions.append(session)
         }
-        if targetID != activeSpaceID {
-            setActiveSpace(targetID)
-        }
-        selection = session.id
-        multiSelection = [session.id]
-        save()
+        // One atomic transition (or same-space selection landing): the new
+        // tab is the final selection when the sweep is aimed.
+        activateSpace(targetID, selecting: session.id)
     }
 
     /// Palette "New Terminal in Current Folder": inherits the given working
@@ -251,16 +275,11 @@ final class TerminalSessionStore: ObservableObject {
             }
 
             guard inserted else { continue }
-            if spaces[spaceIndex].id != activeSpaceID {
-                setActiveSpace(spaces[spaceIndex].id)
-            }
             // Reveal the new tab even if its folder was collapsed.
             if let revealFolderID {
                 collapsedFolderIDs.remove(revealFolderID)
             }
-            selection = session.id
-            multiSelection = [session.id]
-            save()
+            activateSpace(spaces[spaceIndex].id, selecting: session.id)
             return
         }
 
@@ -285,14 +304,9 @@ final class TerminalSessionStore: ObservableObject {
                 ?? Self.existingDirectory(folder.lastWorkingDirectory)
             let session = Self.makeSession(workingDirectory: cwd, accentIndex: sessions.count)
             spaces[spaceIndex].modifyFolder(folderID) { $0.sessions.append(session) }
-            if spaces[spaceIndex].id != activeSpaceID {
-                setActiveSpace(spaces[spaceIndex].id)
-            }
             // Reveal the new tab even if the folder was collapsed.
             collapsedFolderIDs.remove(folderID)
-            selection = session.id
-            multiSelection = [session.id]
-            save()
+            activateSpace(spaces[spaceIndex].id, selecting: session.id)
             return
         }
     }
@@ -636,6 +650,22 @@ final class TerminalSessionStore: ObservableObject {
     /// sweep starts so warm-up effort always chases the active space.
     private var eagerRestoreTicks: [DispatchWorkItem] = []
 
+    /// Injectable stand-in for the sweep the transition path schedules.
+    /// The real sweep drives shared singletons (surface manager, agent
+    /// session store) a unit test can't observe, so tests inject a recorder
+    /// here to verify the transition invariant: exactly one sweep per space
+    /// switch, scheduled after the final selection landed. nil in
+    /// production.
+    var eagerRestoreSweepOverride: (() -> Void)?
+
+    private func scheduleEagerRestoreSweep() {
+        if let eagerRestoreSweepOverride {
+            eagerRestoreSweepOverride()
+        } else {
+            eagerlyRestoreAgentSessions()
+        }
+    }
+
     /// The active space's tabs the sweep will warm, most recently used
     /// first. lastActivity persists across launches, so the ordering favors
     /// the tabs the user is most likely to switch to right after the
@@ -646,12 +676,24 @@ final class TerminalSessionStore: ObservableObject {
     /// transcript I/O happens here and no warm slot is spent on a tab that
     /// wouldn't actually resume.
     func eagerRestoreCandidates(
-        mayRestore: (TerminalSession.ID) -> Bool = { AgentSessionStore.shared.mayRestore(forTab: $0) }
+        mayRestore: ((TerminalSession.ID) -> Bool)? = nil
     ) -> [TerminalSession] {
-        Array(
+        // Resolved here, not as a default argument: the fallback reads the
+        // main-actor AgentSessionStore, and only the method body carries
+        // that isolation.
+        let mayRestore = mayRestore ?? { AgentSessionStore.shared.mayRestore(forTab: $0) }
+        return Array(
             activeSpace.sessions
                 .filter { $0.id != selection && mayRestore($0.id) }
-                .sorted { $0.lastActivity > $1.lastActivity }
+                .sorted {
+                    // Swift's sort is unstable, so equal lastActivity (bulk
+                    // state imports, freshly seeded spaces) needs a stable
+                    // secondary key — otherwise which tabs make the capped
+                    // warm list could differ run to run.
+                    $0.lastActivity != $1.lastActivity
+                        ? $0.lastActivity > $1.lastActivity
+                        : $0.id.uuidString < $1.id.uuidString
+                }
                 .prefix(Self.maxEagerRestores)
         )
     }
@@ -947,13 +989,12 @@ final class TerminalSessionStore: ObservableObject {
     }
 
     /// Selects a session wherever it lives, switching spaces when needed.
+    /// One activateSpace call with the selection included, so a cross-space
+    /// reveal's sweep is aimed at the revealed tab — not at the space's
+    /// remembered selection it would otherwise warm for nothing.
     func reveal(_ sessionID: TerminalSession.ID) {
-        if !activeSpace.sessions.contains(where: { $0.id == sessionID }),
-           let space = spaces.first(where: { $0.sessions.contains { $0.id == sessionID } }) {
-            setActiveSpace(space.id)
-        }
-        selection = sessionID
-        multiSelection = [sessionID]
+        guard let space = spaces.first(where: { $0.sessions.contains { $0.id == sessionID } }) else { return }
+        activateSpace(space.id, selecting: sessionID)
     }
 
     private func recordRecency(_ sessionID: TerminalSession.ID?) {
