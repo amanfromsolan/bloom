@@ -232,8 +232,10 @@ struct EnsoApp: App {
             TerminalCommands(store: sessionStore)
         }
 
-        // Settings as its own fixed-size window (⌘,). A custom Window scene
-        // instead of Settings {} so the design keeps its own chrome.
+        // Settings as its own window (⌘,). A custom Window scene instead of
+        // Settings {} so the design keeps its own chrome. Content is
+        // fixed-width with a flexible height, so contentSize resizability
+        // yields the System Settings behavior — vertical resize only.
         Window("Settings", id: SettingsPanel.windowID) {
             SettingsPanelView(panel: SettingsPanel.shared)
         }

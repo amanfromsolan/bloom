@@ -39,27 +39,37 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .keyboard: "keyboard"
         }
     }
+
 }
 
-/// Notion-Calendar-style settings: nav rail on the left, one scrollable
-/// content pane per section on the right. Lives in its own fixed-size
-/// window (hidden title bar), so the window supplies all chrome.
+/// Notion-Calendar-style settings: the app's own nav rail on the left,
+/// native grouped-form panes on the right. Lives in a hidden-title-bar
+/// window; fixed width, but the height is the user's (contentSize
+/// resizability keeps the width pinned, System Settings style).
 struct SettingsPanelView: View {
     @ObservedObject var panel: SettingsPanel
     @Environment(\.dismissWindow) private var dismissWindow
 
+    /// Whether the pane's rows have scrolled up under the heading; drives
+    /// the heading's large → compact collapse.
+    @State private var isScrolled = false
+
     var body: some View {
         HStack(spacing: 0) {
             navRail
-
-            Rectangle()
-                .fill(Theme.ink.opacity(0.06))
-                .frame(width: 1)
-                .ignoresSafeArea(edges: .top)
+                // Hairline on the sidebar's own edge, over its frost — on
+                // the content side the panel color washes it out to gray.
+                .overlay(alignment: .trailing) {
+                    Rectangle()
+                        .fill(Theme.ink.opacity(0.09))
+                        .frame(width: 1)
+                        .ignoresSafeArea(edges: .top)
+                }
 
             contentPane
         }
-        .frame(width: 780, height: 520)
+        .frame(width: 780)
+        .frame(minHeight: 470, idealHeight: 540, maxHeight: .infinity)
         // Content stays in the safe area (below the hidden title bar) so the
         // window sizes correctly; only the backgrounds extend into that strip.
         .background(Theme.panel.ignoresSafeArea())
@@ -69,6 +79,7 @@ struct SettingsPanelView: View {
                 .keyboardShortcut(.cancelAction)
                 .opacity(0)
         )
+        .background(TrafficLightInset(offset: CGPoint(x: 8, y: 6)))
     }
 
     // MARK: - Nav rail
@@ -76,13 +87,6 @@ struct SettingsPanelView: View {
     private var navRail: some View {
         VStack(alignment: .leading, spacing: 2) {
             // Traffic lights live in the title-bar strip above this content.
-            Text("Settings")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.text(0.4))
-                .padding(.horizontal, 10)
-                .padding(.top, 6)
-                .padding(.bottom, 8)
-
             ForEach(SettingsSection.allCases) { section in
                 SettingsNavRow(
                     section: section,
@@ -94,19 +98,35 @@ struct SettingsPanelView: View {
 
             Spacer()
 
-            Text(appVersionLine)
-                .font(.system(size: 10.5))
-                .foregroundStyle(Theme.text(0.28))
-                .padding(.horizontal, 10)
+            // App identity: bundle name + version, so each channel signs
+            // itself — "Enso Dev", "Enso Next", or plain "Enso". Version in
+            // monospace so the digits sit steady.
+            VStack(alignment: .leading, spacing: 1) {
+                Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Enso")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.text(0.55))
+                Text(UpdateController.shared.currentVersion)
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(Theme.text(0.32))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 2)
         }
-        .padding(12)
-        .frame(width: 196)
-        .background(Theme.inverseInk.opacity(0.22).ignoresSafeArea(edges: .top))
-    }
-
-    private var appVersionLine: String {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
-        return "Enso \(version)"
+        .padding(.horizontal, 12)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .frame(width: 218)
+        .background(
+            // Same frost as the main window's sidebar, but muted: the
+            // heavier tint keeps just a hint of desktop glow — a settings
+            // window shouldn't shimmer as much as the workspace.
+            ZStack {
+                SidebarFrost()
+                Theme.inverseInk.opacity(0.55)
+            }
+            .ignoresSafeArea(edges: .top)
+        )
     }
 
     // MARK: - Content
@@ -114,23 +134,47 @@ struct SettingsPanelView: View {
     private var contentPane: some View {
         // Native grouped form: sections render as inset rounded cards with
         // system row metrics, separators, and dark-mode handling for free.
-        VStack(alignment: .leading, spacing: 0) {
+        // The heading is a safe-area inset pinned over the scroll view on a
+        // material wash, so rows blur through it as they pass beneath.
+        Form {
+            switch panel.section {
+            case .general: GeneralSettings()
+            case .appearance: AppearanceSettings()
+            case .tabs: TabsSettings()
+            case .keyboard: KeyboardSettings()
+            }
+        }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentOffset.y + geometry.contentInsets.top > 4
+        } action: { _, scrolled in
+            isScrolled = scrolled
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            // Collapses once rows scroll beneath it: the title shrinks
+            // (scaleEffect, not font, so the size animates smoothly), the
+            // vertical padding tightens, and an edge-to-edge hairline
+            // separates it from the passing content. Solid panel color —
+            // the collapse is the scroll cue, no frost needed.
             Text(panel.section.title)
                 .font(.system(size: 19, weight: .semibold))
+                .scaleEffect(isScrolled ? 0.74 : 1, anchor: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 28)
-                .padding(.top, 24)
-
-            Form {
-                switch panel.section {
-                case .general: GeneralSettings()
-                case .appearance: AppearanceSettings()
-                case .tabs: TabsSettings()
-                case .keyboard: KeyboardSettings()
+                .padding(.vertical, isScrolled ? 10 : 20)
+                .background(Theme.panel)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(Theme.ink.opacity(0.08))
+                        .frame(height: 1)
+                        .opacity(isScrolled ? 1 : 0)
                 }
-            }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
+                .animation(.easeInOut(duration: 0.18), value: isScrolled)
         }
+        // The heading owns the title-bar strip: 20pt from the window's true
+        // top edge, not from the safe area below it.
+        .ignoresSafeArea(edges: .top)
         .frame(maxWidth: .infinity)
     }
 }
@@ -146,6 +190,7 @@ private struct SettingsNavRow: View {
         Button(action: action) {
             HStack(spacing: 9) {
                 Image(systemName: section.symbol)
+                    .symbolVariant(isSelected ? .fill : .none)
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.text(isSelected ? 0.9 : 0.55))
                     .frame(width: 18)
@@ -173,6 +218,7 @@ private struct GeneralSettings: View {
     @AppStorage("restorePreviousSession") private var restoreSession = true
     @AppStorage("newTabWorkingDirectory") private var newTabDirectory = "home"
     @AppStorage("confirmCloseTabs") private var confirmClose = true
+    @AppStorage("SUEnableAutomaticChecks") private var autoUpdateCheck = true
 
     var body: some View {
         Section("Startup") {
@@ -202,6 +248,23 @@ private struct GeneralSettings: View {
         } footer: {
             PreviewFootnote()
         }
+
+        Section {
+            // SUEnableAutomaticChecks is Sparkle's own backing store for
+            // automaticallyChecksForUpdates, so the updater sees the flip
+            // without any plumbing.
+            Toggle("Automatically check for updates", isOn: $autoUpdateCheck)
+
+            LabeledContent("Check for updates") {
+                Button("Check Now") {
+                    UpdateController.shared.checkForUpdates()
+                }
+            }
+        } header: {
+            Text("Updates")
+        } footer: {
+            Text("Enso \(UpdateController.shared.currentVersion)")
+        }
     }
 }
 
@@ -217,13 +280,13 @@ private struct AppearanceSettings: View {
     }
 
     var body: some View {
-        Section("Theme") {
-            LabeledContent {
-                AppearanceSegments(selectedRaw: appearanceRaw)
-            } label: {
-                Text("Appearance")
-                Text("The app chrome follows this; the terminal keeps its Ghostty theme.")
-            }
+        Section {
+            AppearanceWells(selectedRaw: appearanceRaw)
+                .frame(maxWidth: .infinity)
+        } header: {
+            Text("Theme")
+        } footer: {
+            Text("The app chrome follows this; the terminal keeps its Ghostty theme.")
         }
 
         Section("Text") {
@@ -417,126 +480,171 @@ private struct KeyboardSettings: View {
     }
 }
 
-/// Icon segments for the appearance choice; selection is a neutral ink
-/// well, not the accent, and applies immediately via AppAppearance.
-private struct AppearanceSegments: View {
+/// System-Settings-style appearance choice: three mini-window thumbnails
+/// with a selection ring, centered in their card row. Applies immediately
+/// via AppAppearance.
+private struct AppearanceWells: View {
     let selectedRaw: String
 
-    @Namespace private var selectionWell
-
     private static let options: [(AppAppearance, String, String)] = [
-        (.system, "circle.lefthalf.filled", "Match the system"),
-        (.light, "sun.max", "Always light"),
-        (.dark, "moon", "Always dark"),
+        (.light, "Light", "Always light"),
+        (.dark, "Dark", "Always dark"),
+        (.system, "Auto", "Match the system"),
     ]
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(Self.options, id: \.0) { option, symbol, help in
+        HStack(spacing: 28) {
+            ForEach(Self.options, id: \.0) { option, label, help in
                 let isSelected = selectedRaw == option.rawValue
                 Button {
                     AppAppearance.set(option)
                 } label: {
-                    Image(systemName: symbol)
-                        .symbolVariant(isSelected ? .fill : .none)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.text(isSelected ? 1 : 0.45))
-                        .frame(width: 34, height: 22)
-                        .background {
-                            // One shared well that slides between segments.
-                            if isSelected {
-                                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .fill(Theme.ink.opacity(0.12))
-                                    .matchedGeometryEffect(id: "well", in: selectionWell)
-                            }
-                        }
-                        .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    VStack(spacing: 6) {
+                        AppearanceThumbnail(option: option)
+                            .frame(width: 64, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .strokeBorder(
+                                        isSelected ? Color.accentColor : .primary.opacity(0.15),
+                                        lineWidth: isSelected ? 2 : 1
+                                    )
+                            )
+                        Text(label)
+                            .font(.system(size: 11))
+                            .foregroundStyle(isSelected ? .primary : .secondary)
+                    }
                 }
                 .buttonStyle(.plain)
                 .help(help)
             }
         }
-        .padding(2)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Theme.ink.opacity(0.05))
-        )
-        .animation(.spring(duration: 0.25, bounce: 0.15), value: selectedRaw)
+        .padding(.vertical, 6)
+    }
+}
+
+/// A mini app window: titlebar dots and a few lines of "text". Auto shows
+/// the light and dark halves side by side, like the system's own well.
+private struct AppearanceThumbnail: View {
+    let option: AppAppearance
+
+    var body: some View {
+        switch option {
+        case .light: pane(dark: false)
+        case .dark: pane(dark: true)
+        case .system:
+            HStack(spacing: 0) {
+                pane(dark: false)
+                pane(dark: true)
+            }
+        }
+    }
+
+    private func pane(dark: Bool) -> some View {
+        ZStack(alignment: .topLeading) {
+            dark ? Color(white: 0.14) : Color(white: 0.94)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 2.5) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        Circle()
+                            .fill(dark ? Color(white: 0.5) : Color(white: 0.68))
+                            .frame(width: 3.5, height: 3.5)
+                    }
+                }
+
+                ForEach(0..<3, id: \.self) { line in
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(dark ? Color(white: 0.55) : Color(white: 0.62))
+                        .frame(width: line == 2 ? 22 : 34, height: 3)
+                }
+            }
+            .padding(6)
+        }
+    }
+}
+
+/// Frosted backdrop blurring the desktop behind the window — the same
+/// .sidebar/.behindWindow recipe as the main window's sidebar.
+private struct SidebarFrost: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+/// Nudges the hosting window's traffic lights in from the corner they hug
+/// in a hidden-title-bar window. AppKit re-seats the buttons on every
+/// resize, so each button's target origin (first-seen origin + offset) is
+/// captured once and re-applied — setting an already-correct origin is a
+/// no-op, so the reapply is idempotent.
+private struct TrafficLightInset: NSViewRepresentable {
+    /// x moves the cluster right, y moves it down.
+    let offset: CGPoint
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            context.coordinator.attach(to: view.window, offset: offset)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // The window can be nil during makeNSView; late attach is harmless.
+        context.coordinator.attach(to: nsView.window, offset: offset)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    @MainActor final class Coordinator {
+        private var window: NSWindow?
+        private var targets: [NSWindow.ButtonType: CGPoint] = [:]
+        private var observer: NSObjectProtocol?
+
+        func attach(to window: NSWindow?, offset: CGPoint) {
+            guard let window, self.window == nil else { return }
+            self.window = window
+            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                guard let button = window.standardWindowButton(type) else { continue }
+                targets[type] = CGPoint(
+                    x: button.frame.origin.x + offset.x,
+                    // AppKit's y grows upward; down is minus.
+                    y: button.frame.origin.y - offset.y
+                )
+            }
+            apply()
+            observer = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResizeNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.apply() }
+            }
+        }
+
+        private func apply() {
+            guard let window else { return }
+            for (type, origin) in targets {
+                window.standardWindowButton(type)?.setFrameOrigin(origin)
+            }
+        }
+
+        deinit {
+            if let observer {
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
     }
 }
 
 // MARK: - Building blocks
 
-/// A titled group of rows separated by hairline dividers, Notion-Calendar
-/// style: flat, no boxed background.
-private struct SettingsGroup<Content: View>: View {
-    let title: String
-    /// Every group but the first in its pane draws a hairline above its
-    /// title, so adjacent groups read as separate sections. Opt-in per call
-    /// site because only the pane knows which group leads.
-    var divided: Bool
-    @ViewBuilder let content: Content
-
-    init(_ title: String, divided: Bool = false, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.divided = divided
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if divided {
-                // The pane stack already puts 26 above this group; 16 more
-                // below the rule keeps it closer to the section it opens.
-                Rectangle()
-                    .fill(Theme.text(0.07))
-                    .frame(height: 1)
-                    .padding(.bottom, 16)
-            }
-
-            Text(title)
-                .font(.system(size: 13.5, weight: .semibold))
-                .foregroundStyle(Theme.text(0.92))
-                .padding(.bottom, 8)
-
-            content
-        }
-    }
-}
-
-private struct SettingsRow<Control: View>: View {
-    let title: String
-    var caption: String?
-    @ViewBuilder let control: Control
-
-    init(_ title: String, caption: String? = nil, @ViewBuilder control: () -> Control) {
-        self.title = title
-        self.caption = caption
-        self.control = control()
-    }
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.text(0.85))
-                if let caption {
-                    Text(caption)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.text(0.42))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Spacer(minLength: 20)
-
-            control
-        }
-        .padding(.vertical, 7)
-    }
-}
-
+/// A shortcut as native apps list them: plain right-aligned glyph text
+/// (⇧⌘T), not keycap chips.
 private struct ShortcutRow: View {
     let title: String
     let keys: [String]
@@ -547,32 +655,10 @@ private struct ShortcutRow: View {
     }
 
     var body: some View {
-        HStack {
-            Text(title)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.text(0.85))
-
-            Spacer()
-
-            HStack(spacing: 3) {
-                ForEach(keys, id: \.self) { key in
-                    Text(key)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(Theme.text(0.7))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-                                .fill(Theme.ink.opacity(0.07))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-                                        .strokeBorder(Theme.ink.opacity(0.09), lineWidth: 1)
-                                )
-                        )
-                }
-            }
+        LabeledContent(title) {
+            Text(keys.joined())
+                .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 5)
     }
 }
 
