@@ -43,6 +43,18 @@ final class AgentNotificationCenter: NSObject, UNUserNotificationCenterDelegate 
         }
     }
 
+    /// Drops the tab's banner from Notification Center, delivered or still
+    /// pending. Called when the attention was acknowledged in-app (tab
+    /// selected, app activated on the selected tab) — the banner is answered
+    /// noise by then — and when the tab closes and a click would lead
+    /// nowhere. Unknown ids are a harmless no-op, so callers need not track
+    /// whether a notification was ever posted.
+    func clear(tabID: UUID) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [tabID.uuidString])
+        center.removeDeliveredNotifications(withIdentifiers: [tabID.uuidString])
+    }
+
     /// Runs on the center's callback queue; UNUserNotificationCenter.add is
     /// thread-safe, so no main-actor hop is needed to deliver.
     nonisolated private static func deliver(

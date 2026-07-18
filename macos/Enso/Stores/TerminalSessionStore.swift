@@ -491,6 +491,11 @@ final class TerminalSessionStore: ObservableObject {
             // A closed tab can never resume its agent conversation.
             AgentSessionStore.shared.removeRecords(forTabs: sessionIDs)
         }
+        // Nor can its attention notification lead anywhere; drop any
+        // delivered banner along with the tab.
+        for id in sessionIDs {
+            onAttentionCleared?(id)
+        }
         _ = removeSessions(with: sessionIDs)
         multiSelection.subtract(sessionIDs)
 
@@ -831,16 +836,38 @@ final class TerminalSessionStore: ObservableObject {
         }
     }
 
+    /// The escalation distinction attention policy needs, and nothing more —
+    /// the watcher's payload-carrying event type stays out of the store so
+    /// the store never grows a dependency on the tailing layer.
+    enum AgentAttentionKind {
+        /// The agent is blocked on the user (permission prompt, idle input).
+        case needsInput
+        /// The agent finished a response and went idle.
+        case finishedResponding
+    }
+
+    /// EnsoApp points this at AgentNotificationCenter so an acknowledged (or
+    /// closed) tab's banner leaves Notification Center with the dot. A
+    /// callback, not a direct call: every UN* symbol stays out of this store,
+    /// which must remain testable without a signed bundle.
+    var onAttentionCleared: ((TerminalSession.ID) -> Void)?
+
     /// An agent in the tab asked for the user (Notification hook) or
     /// finished a response (Stop hook). Marks the tab's row with the
     /// attention dot and returns its title when the caller should also post
-    /// a system notification — nil means stay silent: the tab is unknown,
-    /// the user is already looking at it (selected while the app is active),
-    /// or it is already marked (one notification per attention episode; the
-    /// dot persists until the tab is selected). AppKit-free on purpose: the
-    /// caller passes app activity, and EnsoApp owns the UserNotifications
-    /// side, so this stays testable without a signed bundle.
-    func handleAgentAttention(tabID: TerminalSession.ID, isAppActive: Bool) -> String? {
+    /// a system notification — nil means stay silent: the tab is unknown, or
+    /// the user is already looking at it (selected while the app is active).
+    /// A repeated finishedResponding while the dot is already lit stays
+    /// silent (one notification per attention episode), but needsInput posts
+    /// even then: a blocking permission prompt must escalate past an earlier
+    /// "finished responding" mark, and the notification request id is the
+    /// tab UUID, so the newer banner replaces the older one instead of
+    /// stacking. AppKit-free on purpose: the caller passes app activity, and
+    /// EnsoApp owns the UserNotifications side, so this stays testable
+    /// without a signed bundle.
+    func handleAgentAttention(
+        tabID: TerminalSession.ID, kind: AgentAttentionKind, isAppActive: Bool
+    ) -> String? {
         guard let session = sessions.first(where: { $0.id == tabID }) else { return nil }
         if tabID == selection, isAppActive { return nil }
         let alreadyMarked = session.status == .attention
@@ -848,7 +875,17 @@ final class TerminalSessionStore: ObservableObject {
             item.status = .attention
             item.lastActivity = .now
         }
-        return alreadyMarked ? nil : session.title
+        if kind == .finishedResponding, alreadyMarked { return nil }
+        return session.title
+    }
+
+    /// App activation acknowledges the selected tab's dot. An event that
+    /// marks the SELECTED tab while the app is inactive can never be cleared
+    /// by a selection change — selection is already there — so EnsoApp calls
+    /// this from its didBecomeActive observer; the store never watches
+    /// NSApplication itself (AppKit-free).
+    func acknowledgeSelectedAttention() {
+        clearAttention(selection)
     }
 
     /// Selecting a tab acknowledges its attention dot. Guarded like recency
@@ -858,6 +895,7 @@ final class TerminalSessionStore: ObservableObject {
         guard let sessionID, !isCyclingSelection else { return }
         guard sessions.first(where: { $0.id == sessionID })?.status == .attention else { return }
         update(sessionID) { $0.status = .running }
+        onAttentionCleared?(sessionID)
     }
 
     // MARK: - Focus navigation (within the active space)
@@ -935,13 +973,19 @@ final class TerminalSessionStore: ObservableObject {
     }
 
     /// Selects a session wherever it lives, switching spaces when needed.
-    func reveal(_ sessionID: TerminalSession.ID) {
-        if !activeSpace.sessions.contains(where: { $0.id == sessionID }),
-           let space = spaces.first(where: { $0.sessions.contains { $0.id == sessionID } }) {
+    /// False when no space contains it: a notification click can outlive its
+    /// tab, and assigning selection to a ghost id would point the workspace
+    /// at nothing.
+    @discardableResult
+    func reveal(_ sessionID: TerminalSession.ID) -> Bool {
+        guard let space = spaces.first(where: { $0.sessions.contains { $0.id == sessionID } })
+        else { return false }
+        if space.id != activeSpaceID {
             setActiveSpace(space.id)
         }
         selection = sessionID
         multiSelection = [sessionID]
+        return true
     }
 
     private func recordRecency(_ sessionID: TerminalSession.ID?) {

@@ -290,7 +290,10 @@ the same gate (env vars absent → wrappers pass through inertly even if still o
 The map files carry more than restore state. The claude wrapper also registers
 `Notification` (claude is waiting on a permission prompt or input; payload has a
 human-readable `message`) and `Stop` (claude finished responding) hooks through the
-same relay, and the codex wrapper's existing `hooks.Stop` serves the same role.
+same relay, and the codex wrapper's existing `hooks.Stop` serves the same role —
+codex hook payloads carry the same Claude-style `hook_event_name` discriminator
+(verified against codex-cli 0.144.4's hook wire schema), so one detection path in
+`AgentAttentionWatcher.attentionEvent` covers both agents.
 `AgentAttentionWatcher` tails the map files while the app runs — a 1s stat-and-offset
 poll that reads only appended bytes — and surfaces these events for tabs the user
 isn't looking at as the sidebar's attention dot plus a clickable system notification

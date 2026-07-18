@@ -127,6 +127,7 @@ struct EnsoApp: App {
     /// timer must start exactly once.
     private static var attentionWatcher: AgentAttentionWatcher?
     private static var attentionNotifier: AgentNotificationCenter?
+    private static var attentionActivationObserver: NSObjectProtocol?
 
     init() {
         // macOS ships with font smoothing off since Big Sur, which renders
@@ -153,27 +154,52 @@ struct EnsoApp: App {
         // Agent attention (#30): tail the map files for the Notification and
         // Stop hooks the wrappers register, mark the tab's sidebar row, and
         // post a clickable system notification when the user isn't already
-        // looking at that tab. Gated like recording itself — with the setting
-        // off no surface gets the shim env, so no events can ever arrive and
-        // the poll timer would be pure waste.
-        if AgentSessionStore.shared.isEnabled, Self.attentionWatcher == nil {
+        // looking at that tab. NOT gated on the recording setting: with it
+        // off no surface gets the shim env, so no events arrive and the idle
+        // 1s stat sweep costs nothing — while a launch-time gate would leave
+        // a mid-run enable recording events with no watcher until relaunch.
+        if Self.attentionWatcher == nil {
             let notifier = AgentNotificationCenter()
             notifier.activate()
             notifier.onSelectTab = { tabID in
-                store.reveal(tabID)
+                // A notification click can outlive its tab; when reveal
+                // refuses the ghost id there is nothing to bring forward.
+                guard store.reveal(tabID) else { return }
                 NSApp.activate(ignoringOtherApps: true)
+            }
+            // Acknowledged (or closed) tabs must not leave a stale banner in
+            // Notification Center; the store routes removal through this
+            // callback so it stays UserNotifications-free.
+            store.onAttentionCleared = { tabID in
+                notifier.clear(tabID: tabID)
             }
             let watcher = AgentAttentionWatcher(
                 directory: AgentSessionStore.defaultDirectory
             ) { tabID, event in
+                let kind: TerminalSessionStore.AgentAttentionKind = switch event {
+                case .needsInput: .needsInput
+                case .finishedResponding: .finishedResponding
+                }
                 guard let title = store.handleAgentAttention(
-                    tabID: tabID, isAppActive: NSApp.isActive
+                    tabID: tabID, kind: kind, isAppActive: NSApp.isActive
                 ) else { return }
                 notifier.post(tabID: tabID, title: title, body: event.notificationBody)
             }
             watcher.start()
             Self.attentionWatcher = watcher
             Self.attentionNotifier = notifier
+            // An event can mark the SELECTED tab while the app is inactive;
+            // selection never changes on return, so activation is the
+            // acknowledgment that clears it (kept here so the store stays
+            // AppKit-free).
+            Self.attentionActivationObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil, queue: .main
+            ) { _ in
+                Task { @MainActor in
+                    store.acknowledgeSelectedAttention()
+                }
+            }
         }
     }
 

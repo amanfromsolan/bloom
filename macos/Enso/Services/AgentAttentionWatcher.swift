@@ -171,6 +171,9 @@ final class AgentAttentionWatcher {
     /// those only Notification and Stop. Everything else — SessionStart and
     /// SessionEnd (restore's concern), launch/user-session records, garbage —
     /// is nil, never fatal, mirroring AgentSessionStore's tolerant compaction.
+    /// Both agents speak the same schema here: codex's hook payloads carry
+    /// the Claude-style hook_event_name / "Stop" discriminator (verified
+    /// against codex-cli 0.144.4's hook wire tables), so one key serves both.
     nonisolated static func attentionEvent(fromLine line: String) -> AttentionEvent? {
         guard let data = line.data(using: .utf8),
               let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],

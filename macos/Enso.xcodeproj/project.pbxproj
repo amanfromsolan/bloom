@@ -28,6 +28,8 @@
 		A1AGADP0012FD810C30001BF12 /* AgentSessionAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGADP0022FD810C30001BF12 /* AgentSessionAdapter.swift */; };
 		A1AGSAN0012FD810C30001BF12 /* AgentLaunchSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGSAN0022FD810C30001BF12 /* AgentLaunchSanitizer.swift */; };
 		A1AGSTR0012FD810C30001BF12 /* AgentSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGSTR0022FD810C30001BF12 /* AgentSessionStore.swift */; };
+		A1AGWCH0012FD810C30001BF12 /* AgentAttentionWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGWCH0022FD810C30001BF12 /* AgentAttentionWatcher.swift */; };
+		A1AGNTF0012FD810C30001BF12 /* AgentNotificationCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGNTF0022FD810C30001BF12 /* AgentNotificationCenter.swift */; };
 		A1AGSHM0012FD810C30001BF12 /* AgentShimInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGSHM0022FD810C30001BF12 /* AgentShimInstaller.swift */; };
 		A1AGRES0012FD810C30001BF12 /* agent-shims in Resources */ = {isa = PBXBuildFile; fileRef = A1AGRES0022FD810C30001BF12 /* agent-shims */; };
 		A1AUTONM012FD810C30001BF12 /* TabAutoNamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AUTONM022FD810C30001BF12 /* TabAutoNamer.swift */; };
@@ -92,6 +94,8 @@
 		A1AGADP0022FD810C30001BF12 /* AgentSessionAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionAdapter.swift; sourceTree = "<group>"; };
 		A1AGSAN0022FD810C30001BF12 /* AgentLaunchSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLaunchSanitizer.swift; sourceTree = "<group>"; };
 		A1AGSTR0022FD810C30001BF12 /* AgentSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionStore.swift; sourceTree = "<group>"; };
+		A1AGWCH0022FD810C30001BF12 /* AgentAttentionWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAttentionWatcher.swift; sourceTree = "<group>"; };
+		A1AGNTF0022FD810C30001BF12 /* AgentNotificationCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentNotificationCenter.swift; sourceTree = "<group>"; };
 		A1AGSHM0022FD810C30001BF12 /* AgentShimInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentShimInstaller.swift; sourceTree = "<group>"; };
 		A1AGRES0022FD810C30001BF12 /* agent-shims */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "agent-shims"; path = "Resources/agent-shims"; sourceTree = "<group>"; };
 		A1AUTONM022FD810C30001BF12 /* TabAutoNamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabAutoNamer.swift; sourceTree = "<group>"; };
@@ -226,7 +230,9 @@
 		A10000222FD810C30001BF12 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A1AGWCH0022FD810C30001BF12 /* AgentAttentionWatcher.swift */,
 				A1AGSAN0022FD810C30001BF12 /* AgentLaunchSanitizer.swift */,
+				A1AGNTF0022FD810C30001BF12 /* AgentNotificationCenter.swift */,
 				A1AGADP0022FD810C30001BF12 /* AgentSessionAdapter.swift */,
 				A1AGSTR0022FD810C30001BF12 /* AgentSessionStore.swift */,
 				A1AGSHM0022FD810C30001BF12 /* AgentShimInstaller.swift */,
@@ -448,6 +454,8 @@
 				A1AGADP0012FD810C30001BF12 /* AgentSessionAdapter.swift in Sources */,
 				A1AGSTR0012FD810C30001BF12 /* AgentSessionStore.swift in Sources */,
 				A1AGSHM0012FD810C30001BF12 /* AgentShimInstaller.swift in Sources */,
+				A1AGWCH0012FD810C30001BF12 /* AgentAttentionWatcher.swift in Sources */,
+				A1AGNTF0012FD810C30001BF12 /* AgentNotificationCenter.swift in Sources */,
 				A1TABSW012FD810C30001BF12 /* TabSwitcher.swift in Sources */,
 				A1AUTONM012FD810C30001BF12 /* TabAutoNamer.swift in Sources */,
 				A1CMDCTR012FD810C30001BF12 /* CommandCenter.swift in Sources */,
