@@ -13,12 +13,15 @@ struct GhosttyTerminalHostView: NSViewRepresentable {
     /// The split container the selected tab is a pane of, when it is one.
     let container: SplitContainer?
     let store: TerminalSessionStore
+    /// The single card's live corner radius; each split pane card reuses
+    /// it so panes read as the same card, only smaller.
+    let paneCornerRadius: CGFloat
 
     func makeNSView(context: Context) -> SplitLayoutHostView {
-        let host = SplitLayoutHostView()
-        host.wantsLayer = true
-        host.layer?.backgroundColor = NSColor(GhosttyRuntime.shared.themeBackground).cgColor
-        return host
+        // Transparent: for the unsplit tab the workspace paints the
+        // terminal background behind us; when split, the window chrome
+        // must show through the gaps between the pane cards.
+        SplitLayoutHostView()
     }
 
     func updateNSView(_ host: SplitLayoutHostView, context: Context) {
@@ -44,6 +47,7 @@ struct GhosttyTerminalHostView: NSViewRepresentable {
         }
 
         host.store = store
+        host.paneCornerRadius = paneCornerRadius
         let containerID = container?.id
         host.onRatioChange = { [weak store] path, ratio in
             guard let containerID else { return }
@@ -67,9 +71,17 @@ final class SplitLayoutHostView: NSView {
     /// For the pane headers' rename plumbing; set by the representable
     /// before every apply.
     weak var store: TerminalSessionStore?
+    /// The card corner radius split panes wear; set by the representable.
+    var paneCornerRadius: CGFloat = 10
 
     private var tree: SplitNode?
     private var surfaces: [TerminalSession.ID: GhosttySurfaceView] = [:]
+    /// One card per pane, holding that pane's header and surface. When the
+    /// layout is split each card wears the app's terminal-card chrome
+    /// (rounded corners, hairline, shadow) so panes sit as individual
+    /// cards on the window chrome; the unsplit tab's single card is drawn
+    /// by the root view and its lone pane card renders chromeless.
+    private var cards: [TerminalSession.ID: PaneCardView] = [:]
     /// Live session snapshots for the panes on screen; kept so a layout
     /// pass can rebuild a header's content when its width crosses the
     /// compact threshold.
@@ -104,36 +116,46 @@ final class SplitLayoutHostView: NSView {
     ) {
         self.tree = tree
         self.focusedID = focusedID
-
-        // Detach surfaces that left the layout (switched tab or closed
-        // pane); their shells keep running in the surface manager.
-        let incoming = Set(surfaces.values.map(ObjectIdentifier.init))
-        for view in self.surfaces.values
-        where !incoming.contains(ObjectIdentifier(view)) && view.superview === self {
-            view.removeFromSuperview()
-        }
-
-        var newlyAttached = false
-        for view in surfaces.values where view.superview !== self {
-            view.autoresizingMask = []
-            addSubview(view)
-            newlyAttached = true
-        }
-        self.surfaces = surfaces
-
         self.sessions = sessions
 
-        // Headers track the surfaces one-to-one: refresh live ones with the
-        // session's current title/process/cwd, drop the ones whose pane
-        // left, and mount headers for new panes. Which VARIANT a header
-        // wears (full vs compact) is a width question, settled during the
-        // layout pass below once the pane rects are known.
-        for (id, header) in headers where surfaces[id] == nil || sessions[id] == nil {
-            header.removeFromSuperview()
+        // A pane that left the layout (switched tab, closed pane) takes
+        // its card — header included — with it; its surface detaches but
+        // keeps running in the surface manager.
+        for (id, card) in cards where surfaces[id] == nil || sessions[id] == nil {
+            self.surfaces[id]?.removeFromSuperview()
+            card.removeFromSuperview()
+            cards.removeValue(forKey: id)
             headers.removeValue(forKey: id)
             compactHeaders.removeValue(forKey: id)
         }
+        self.surfaces = surfaces
+
+        // Split layouts draw every pane as its own rounded card on the
+        // window chrome; the unsplit tab keeps the root view's single-card
+        // treatment, so its lone pane renders chromeless.
+        let isSplitLayout = if case .split = tree { true } else { false }
+
+        var newlyAttached = false
         for id in surfaces.keys {
+            guard sessions[id] != nil, let surface = surfaces[id] else { continue }
+            let card = cards[id] ?? {
+                let card = PaneCardView()
+                cards[id] = card
+                addSubview(card)
+                return card
+            }()
+            card.setChrome(enabled: isSplitLayout, cornerRadius: paneCornerRadius)
+
+            if surface.superview !== card.content {
+                surface.autoresizingMask = []
+                card.content.addSubview(surface)
+                newlyAttached = true
+            }
+
+            // Headers live inside the card, above the surface. Which
+            // VARIANT one wears (full vs compact) is a width question,
+            // settled during the layout pass below once pane rects are
+            // known.
             guard let rootView = headerRootView(for: id) else { continue }
             if let header = headers[id] {
                 header.rootView = rootView
@@ -148,7 +170,7 @@ final class SplitLayoutHostView: NSView {
                 // are pane chrome, not window chrome: no safe areas.
                 header.safeAreaRegions = []
                 headers[id] = header
-                addSubview(header)
+                card.content.addSubview(header)
             }
         }
 
@@ -191,10 +213,10 @@ final class SplitLayoutHostView: NSView {
 
     // MARK: - Geometry
 
-    /// Full divider hit target; the visible hairline is drawn centered
-    /// inside it, so panes read nearly flush while the grab area stays
-    /// comfortable.
-    static let dividerThickness: CGFloat = 6
+    /// The gap between pane cards — window chrome showing through, sized
+    /// to the card's own 10pt window inset so the spacing reads native.
+    /// The whole gap doubles as the resize-drag hit target.
+    static let dividerThickness: CGFloat = 10
 
     /// The in-pane header band: two lines (title, then cwd breadcrumb)
     /// centered in the same 46pt the old header strip used, sitting on the
@@ -258,20 +280,21 @@ final class SplitLayoutHostView: NSView {
     private func place(_ node: SplitNode, in rect: CGRect, path: SplitPath, used: inout Set<SplitPath>) {
         switch node {
         case .leaf(let id):
-            // Header inside the pane's own region, surface below it — the
-            // header claims the top band only within this leaf, so nothing
-            // spans across a divider.
+            // The pane's card claims the whole region; header and surface
+            // stack inside it (card-local coordinates), so nothing ever
+            // spans across the gap between panes.
             let paneRect = rect.integral
             // The full-vs-compact call is made here, off the measured
             // width, so window resizes and divider drags respond live.
             updateHeaderVariant(for: id, paneWidth: paneRect.width)
+            cards[id]?.frame = paneRect
             let headerHeight = min(Self.paneHeaderHeight, paneRect.height)
             headers[id]?.frame = CGRect(
-                x: paneRect.minX, y: paneRect.minY,
+                x: 0, y: 0,
                 width: paneRect.width, height: headerHeight
             )
             surfaces[id]?.frame = CGRect(
-                x: paneRect.minX, y: paneRect.minY + headerHeight,
+                x: 0, y: headerHeight,
                 width: paneRect.width, height: max(paneRect.height - headerHeight, 0)
             )
         case .split(let branch):
@@ -326,9 +349,10 @@ final class SplitLayoutHostView: NSView {
     }
 }
 
-/// One draggable split divider: a hairline over the terminal background
-/// with a wider grab area, converting pointer position into the parent
-/// split's first-child ratio.
+/// One draggable split divider: an invisible strip spanning the chrome
+/// gap between two pane cards, converting pointer position into the
+/// parent split's first-child ratio. Draws nothing — the gap itself is
+/// the visual — but keeps the resize cursor affordance.
 final class SplitDividerView: NSView {
     var path = SplitPath()
     var direction: SplitDirection = .horizontal
@@ -339,19 +363,6 @@ final class SplitDividerView: NSView {
     var onDragEnded: (() -> Void)?
 
     override var isFlipped: Bool { true }
-
-    override func draw(_ dirtyRect: NSRect) {
-        // The terminal theme background stays dark in both appearances;
-        // a quiet light hairline reads as the pane seam.
-        NSColor.white.withAlphaComponent(0.14).setFill()
-        let line: NSRect
-        if direction == .horizontal {
-            line = NSRect(x: bounds.midX - 0.5, y: 0, width: 1, height: bounds.height)
-        } else {
-            line = NSRect(x: 0, y: bounds.midY - 0.5, width: bounds.width, height: 1)
-        }
-        line.fill()
-    }
 
     override func resetCursorRects() {
         super.resetCursorRects()
@@ -382,6 +393,107 @@ final class SplitDividerView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         onDragEnded?()
+    }
+}
+
+// MARK: - Pane card
+
+/// One pane's card: the same treatment as the app's single terminal card
+/// — theme background, `Theme.ink` 9% hairline, the soft drop shadow, and
+/// continuous rounded corners at the card's own radius — applied per pane
+/// when the layout is split, so each pane reads as a mini terminal card
+/// sitting on the window chrome. The unsplit tab's chrome is drawn by the
+/// root view, so its lone card renders chromeless (flat theme background).
+///
+/// Structure: the outer view carries the shadow (masksToBounds off, with
+/// an explicit shadowPath so the Metal-backed content never forces
+/// offscreen shadow rendering); the inner `content` view rounds and clips
+/// the header and surface.
+final class PaneCardView: NSView {
+    /// Rounded clipping container for the pane's header and surface.
+    let content: NSView = FlippedContentView()
+
+    private var chromeEnabled = false
+    private var cornerRadius: CGFloat = 0
+
+    override var isFlipped: Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.masksToBounds = false
+        content.wantsLayer = true
+        content.layer?.masksToBounds = true
+        content.layer?.cornerCurve = .continuous
+        content.layer?.backgroundColor = NSColor(GhosttyRuntime.shared.themeBackground).cgColor
+        content.frame = bounds
+        content.autoresizingMask = [.width, .height]
+        addSubview(content)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func setChrome(enabled: Bool, cornerRadius radius: CGFloat) {
+        chromeEnabled = enabled
+        cornerRadius = radius
+        content.layer?.cornerRadius = enabled ? radius : 0
+        content.layer?.borderWidth = enabled ? 1 : 0
+        applyBorderColor()
+        if enabled {
+            // The single card's SwiftUI shadow, translated: black 22% at
+            // 12pt blur, 3pt downward.
+            layer?.shadowColor = NSColor.black.cgColor
+            layer?.shadowOpacity = 0.22
+            layer?.shadowRadius = 12
+            layer?.shadowOffset = CGSize(width: 0, height: -3)
+        } else {
+            layer?.shadowOpacity = 0
+        }
+        updateShadowPath()
+    }
+
+    override func layout() {
+        super.layout()
+        updateShadowPath()
+    }
+
+    private func updateShadowPath() {
+        guard chromeEnabled, bounds.width > 0, bounds.height > 0 else {
+            layer?.shadowPath = nil
+            return
+        }
+        let radius = min(cornerRadius, min(bounds.width, bounds.height) / 2)
+        layer?.shadowPath = CGPath(
+            roundedRect: bounds,
+            cornerWidth: radius, cornerHeight: radius,
+            transform: nil
+        )
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyBorderColor()
+    }
+
+    /// The single card's hairline is `Theme.ink` at 9% — white ink on the
+    /// dark appearance, near-black on light. CALayer colors don't adapt on
+    /// their own, so re-resolve whenever the effective appearance changes.
+    private func applyBorderColor() {
+        guard chromeEnabled else { return }
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let ink = isDark
+            ? NSColor(white: 1, alpha: 0.09)
+            : NSColor(white: 0.08, alpha: 0.09)
+        content.layer?.borderColor = ink.cgColor
+    }
+
+    /// Header/surface frames are computed top-down; a flipped container
+    /// keeps the math identical to the host's.
+    private final class FlippedContentView: NSView {
+        override var isFlipped: Bool { true }
     }
 }
 

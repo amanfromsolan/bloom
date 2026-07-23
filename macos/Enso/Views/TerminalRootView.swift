@@ -25,6 +25,13 @@ struct TerminalRootView: View {
     // terminal card keeps its colors, as terminals conventionally do.
     private var isWindowInactive: Bool { controlActiveState == .inactive }
 
+    /// Whether the selected tab is a pane of a split container — the
+    /// workspace then renders per-pane cards instead of the single card.
+    private var isSplitSelection: Bool {
+        guard let selection = store.selection else { return false }
+        return store.splitContainer(containing: selection) != nil
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             if store.isSidebarVisible {
@@ -55,15 +62,28 @@ struct TerminalRootView: View {
                 )
             }
 
-            // Terminal floats as an inset card on the frosted window.
-            TerminalWorkspaceView(store: store)
+            // Terminal floats as an inset card on the frosted window. A
+            // split selection instead draws each PANE as its own card on
+            // the chrome (inside the host view), so the single-card
+            // treatment here collapses to values that render nothing —
+            // value changes, not structural ones, because swapping the
+            // workspace's view identity would tear down the Metal-backed
+            // representable mid-switch.
+            TerminalWorkspaceView(store: store, cardCornerRadius: cardCornerRadius)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+                .clipShape(RoundedRectangle(
+                    cornerRadius: isSplitSelection ? 0 : cardCornerRadius,
+                    style: .continuous
+                ))
                 .overlay(
                     RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                         .strokeBorder(Theme.ink.opacity(0.09), lineWidth: 1)
+                        .opacity(isSplitSelection ? 0 : 1)
                 )
-                .shadow(color: .black.opacity(0.22), radius: 12, y: 3)
+                .shadow(
+                    color: isSplitSelection ? .clear : .black.opacity(0.22),
+                    radius: 12, y: 3
+                )
                 .overlay {
                     if switcher.isShowingHUD {
                         ZStack {
