@@ -1,251 +1,23 @@
 import SwiftUI
 
-/// Slim strip above the terminal that doubles as the window titlebar:
-/// blends into the terminal background, drags the window. Double-click on
-/// the title renames it in place; double-click on empty strip zooms like a
-/// real titlebar. Shows the tab name plus a live breadcrumb of the shell's
-/// cwd.
-struct TerminalHeaderView: View {
-    let session: TerminalSession
-    @ObservedObject var store: TerminalSessionStore
+// The old full-width header strip above the terminal is gone: each pane
+// draws its own in-pane header (see PaneHeaderView in
+// GhosttyTerminalHostView.swift) so split dividers run edge to edge with
+// no chrome across them. This file keeps the window-chrome helpers the
+// strip used to own — they serve the root view's drag strips, the
+// titlebar sidebar toggle, and the pane headers' ink math.
 
-    @State private var isRenaming = false
-    @State private var draftTitle = ""
-    @FocusState private var renameFieldFocused: Bool
-
-    /// Measured strip width; caps the title cluster below.
-    @State private var headerWidth: CGFloat = 0
-
-    var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 8) {
-                // Leading slot mirrors the sidebar row: the detected-process
-                // badge supplants the accent dot while something known is
-                // running; idle tabs keep today's dot — never an empty slot.
-                if let process = session.runningProcess {
-                    HeaderProcessBadge(process: process, ink: terminalInk)
-                } else {
-                    // Idle terminal glyph, tinted like the tool badges;
-                    // 24 pt from the full-bleed header artwork, same slot
-                    // the agent marks occupy.
-                    Image("TerminalIdleHeader")
-                        .resizable()
-                        .renderingMode(.template)
-                        .aspectRatio(contentMode: .fit)
-                        .foregroundStyle(terminalInk.opacity(0.5))
-                        .frame(width: 24, height: 24)
-                }
-
-                if isRenaming {
-                    // An invisible twin of the title keeps the field exactly
-                    // as wide as the typed text — a fixed-width field would
-                    // shove the breadcrumb sideways the moment editing
-                    // starts. The trailing space gives the caret room.
-                    Text(draftTitle + " ")
-                        .font(.system(size: 15, weight: .regular))
-                        .lineLimit(1)
-                        .opacity(0)
-                        .overlay {
-                            TextField("", text: $draftTitle)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 15, weight: .regular))
-                                .foregroundStyle(terminalInk.opacity(0.9))
-                                .environment(\.colorScheme, terminalColorScheme)
-                                .focused($renameFieldFocused)
-                                .onSubmit {
-                                    commitRename()
-                                    restoreTerminalFocus()
-                                }
-                                .onExitCommand {
-                                    isRenaming = false
-                                    restoreTerminalFocus()
-                                }
-                        }
-                } else {
-                    Text(session.title)
-                        .font(.system(size: 15, weight: .regular))
-                        .foregroundStyle(terminalInk.opacity(0.9))
-                        .lineLimit(1)
-                }
-
-                breadcrumb
-            }
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                beginRename()
-            }
-            // A long title + breadcrumb never swallows the whole strip:
-            // cap the cluster at 80% so the header keeps visible breathing
-            // room (and drag/zoom target) on the right. A max, not a fixed
-            // width — short titles still hug their content.
-            .frame(
-                maxWidth: headerWidth > 0 ? headerWidth * 0.8 : nil,
-                alignment: .leading
-            )
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 46)
-        .frame(maxWidth: .infinity)
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            proxy.size.width
-        } action: { width in
-            headerWidth = width
-        }
-        #if DEBUG
-        // Overlaid so the badge claims no room from the title cluster.
-        .overlay(alignment: .trailing) {
-            DevBadge()
-                .frame(height: 22)
-                .padding(.trailing, 12)
-        }
-        #endif
-        // Drag + double-click-zoom handled in AppKit, not SwiftUI: a
-        // WindowDragGesture claims the mouse-down to start dragging, so a
-        // paired .onTapGesture(count: 2) never recognizes and zoom silently
-        // did nothing. WindowDragHandle reads the raw clickCount instead.
-        // Sits behind the title cluster, whose own double-click (rename)
-        // keeps taking precedence.
-        .background(WindowDragHandle())
-        // Click-away while renaming: keep the edit (matching focus-loss
-        // behavior) and let the click do its normal job — same contract as
-        // the sidebar's inline renames.
-        .background(
-            RenameClickAway(active: isRenaming) {
-                commitRename()
-            }
-        )
-        .onChange(of: renameFieldFocused) { _, focused in
-            if !focused, isRenaming {
-                commitRename()
-            }
-        }
-    }
-
-    // MARK: - Rename
-
-    private func beginRename() {
-        guard !isRenaming else { return }
-        draftTitle = session.title
-        isRenaming = true
-        renameFieldFocused = true
-    }
-
-    /// Commit doubles as cancel: a blanked or untouched title leaves the
-    /// session alone.
-    private func commitRename() {
-        guard isRenaming else { return }
-        isRenaming = false
-        let trimmed = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != session.title else { return }
-        store.rename(session, to: trimmed)
-    }
-
-    /// Ending a rename leaves first responder parked nowhere, so Return
-    /// stops reaching the shell; hand the keyboard back to the terminal.
-    private func restoreTerminalFocus() {
-        GhosttySurfaceManager.shared.restoreFocus(to: store.selection)
-    }
-
-    /// Ink for the process badge: dark ink on a light terminal theme, light
-    /// ink on a dark one.
-    private var terminalInk: Color {
-        GhosttyRuntime.shared.terminalColorScheme == .light ? .black : .white
-    }
-
-    /// Appearance for the rename field's editing chrome — selection
-    /// highlight, caret — so it keys off the terminal background rather than
-    /// the app appearance.
-    private var terminalColorScheme: ColorScheme {
-        GhosttyRuntime.shared.terminalColorScheme
-    }
-
-    // MARK: - Breadcrumb
-
-    private var breadcrumb: some View {
-        let trail = PathTrail(path: session.workingDirectory)
-
-        return HStack(spacing: 4) {
-            Image(systemName: trail.rootIcon)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(terminalInk.opacity(trail.segments.isEmpty ? 0.42 : 0.3))
-
-            if let rootLabel = trail.rootLabel {
-                Text(rootLabel)
-                    .font(.system(size: 12))
-                    .foregroundStyle(terminalInk.opacity(0.42))
-            }
-
-            ForEach(Array(trail.segments.enumerated()), id: \.offset) { index, segment in
-                Image(systemName: "chevron.compact.right")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(terminalInk.opacity(0.18))
-
-                Text(segment)
-                    .font(.system(size: 12))
-                    .foregroundStyle(terminalInk.opacity(
-                        index == trail.segments.count - 1 ? 0.42 : 0.28
-                    ))
-                    .lineLimit(1)
-            }
-        }
-    }
-}
-
-/// Detected-process icon in the header's leading slot — the header twin of
-/// the sidebar's ProcessBadgeView. Agents get their full-color mark (24 pt,
-/// drawn from the 48-grid artwork); tool symbols render in the luminance-
-/// derived ink at a subdued opacity to stay legible and quiet on any
-/// Ghostty theme.
-private struct HeaderProcessBadge: View {
-    let process: TabProcess
-    let ink: Color
-
-    var body: some View {
-        switch process.badge {
-        case .agent(let base):
-            // The header sits on the Ghostty theme background, not the app
-            // chrome, so the artwork's light/dark appearance variant must
-            // key off that color's luminance rather than the system
-            // appearance. Overriding the environment colorScheme makes the
-            // asset catalog resolve the matching variant.
-            // 24 pt draws the 48-grid artwork: 24 pt @2x is 48 physical
-            // pixels, so the marks land 1:1 on the Retina grid.
-            Image("\(base)48")
-                .resizable()
-                .renderingMode(.original)
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 24, height: 24)
-                .environment(\.colorScheme, GhosttyRuntime.shared.terminalColorScheme)
-        case .symbol(let name):
-            Image(systemName: name)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(ink.opacity(0.6))
-        case .dot:
-            // A live process without artwork: the idle glyph turns blue.
-            Image("TerminalIdleHeader")
-                .resizable()
-                .renderingMode(.template)
-                .aspectRatio(contentMode: .fit)
-                .foregroundStyle(Color.blue.opacity(0.8))
-                .frame(width: 24, height: 24)
-        }
-    }
-
-}
-
-private extension GhosttyRuntime {
-    /// The header sits on the Ghostty theme background, not the app chrome,
-    /// so ink, artwork variants, and editing chrome all key off that color's
-    /// luminance rather than the system appearance. The single home for the
-    /// threshold — ink, badge, and rename field must never disagree.
+extension GhosttyRuntime {
+    /// Pane headers sit on the Ghostty theme background, not the app
+    /// chrome, so ink, artwork variants, and editing chrome all key off
+    /// that color's luminance rather than the system appearance. The
+    /// single home for the threshold — ink and badge must never disagree.
     var terminalColorScheme: ColorScheme {
         themeBackground.relativeLuminance > 0.179 ? .light : .dark
     }
 }
 
-private extension Color {
+extension Color {
     /// WCAG relative luminance (sRGB, linearized). Used to pick dark vs
     /// light ink against the terminal background; the 0.179 threshold is
     /// where black and white text reach equal contrast.
@@ -264,7 +36,7 @@ private extension Color {
 #if DEBUG
 /// Marks an "Enso Dev" window so it's never mistaken for the installed
 /// Enso while dogfooding. Debug builds only.
-private struct DevBadge: View {
+struct DevBadge: View {
     var body: some View {
         Text("DEV")
             .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -309,7 +81,7 @@ struct SidebarToggleButton: View {
 /// SwiftUI's WindowDragGesture eats the mouse-down to begin its own drag,
 /// which starves any paired double-click tap. This is the same drag/double-
 /// click split Ghostty uses for its titlebar (WindowDragView). Drop it behind
-/// content — the title cluster's own rename gesture still wins over it.
+/// content — overlaid content's own gestures still win over it.
 struct WindowDragHandle: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { DragView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
@@ -350,46 +122,4 @@ extension NSWindow {
             performZoom(nil)
         }
     }
-}
-
-/// Splits an absolute path into a friendly root (home / disk) plus trailing
-/// components, collapsing deep paths around an ellipsis.
-struct PathTrail {
-    let rootIcon: String
-    let rootLabel: String?
-    let segments: [String]
-
-    init(path: String) {
-        let home = NSHomeDirectory()
-
-        if path == home || path == "~" {
-            rootIcon = "house.fill"
-            rootLabel = "Home"
-            segments = []
-            return
-        }
-
-        var components: [String]
-        if path.hasPrefix(home + "/") {
-            rootIcon = "house.fill"
-            rootLabel = nil
-            components = path.dropFirst(home.count + 1).split(separator: "/").map(String.init)
-        } else {
-            rootIcon = "internaldrive.fill"
-            rootLabel = path == "/" ? "Macintosh HD" : nil
-            components = path.split(separator: "/").map(String.init)
-        }
-
-        // Deep paths read as noise; keep the last two and hint at the rest.
-        if components.count > 3 {
-            components = ["…"] + components.suffix(2)
-        }
-        segments = components
-    }
-}
-
-#Preview {
-    let store = TerminalSessionStore.preview
-    TerminalHeaderView(session: store.sessions[0], store: store)
-        .background(.black)
 }

@@ -23,7 +23,7 @@ struct GhosttyTerminalHostView: NSViewRepresentable {
 
     func updateNSView(_ host: SplitLayoutHostView, context: Context) {
         guard let session else {
-            host.apply(tree: nil, surfaces: [:], focusedID: nil)
+            host.apply(tree: nil, sessions: [:], surfaces: [:], focusedID: nil)
             return
         }
 
@@ -31,6 +31,7 @@ struct GhosttyTerminalHostView: NSViewRepresentable {
         // single-leaf "tree" through the same layout path.
         let tree: SplitNode = container?.tree ?? .leaf(session.id)
 
+        var sessions: [TerminalSession.ID: TerminalSession] = [:]
         var surfaces: [TerminalSession.ID: GhosttySurfaceView] = [:]
         for id in tree.leafIDs {
             // Resolved against the live store so a pane's surface spawns
@@ -38,6 +39,7 @@ struct GhosttyTerminalHostView: NSViewRepresentable {
             guard let live = store.sessions.first(where: { $0.id == id }) else { continue }
             let surface = GhosttySurfaceManager.shared.view(for: live)
             store.wireSurfaceCallbacks(surface, for: id)
+            sessions[id] = live
             surfaces[id] = surface
         }
 
@@ -50,7 +52,7 @@ struct GhosttyTerminalHostView: NSViewRepresentable {
             store?.commitSplitLayout()
         }
 
-        host.apply(tree: tree, surfaces: surfaces, focusedID: session.id)
+        host.apply(tree: tree, sessions: sessions, surfaces: surfaces, focusedID: session.id)
     }
 }
 
@@ -64,6 +66,10 @@ final class SplitLayoutHostView: NSView {
 
     private var tree: SplitNode?
     private var surfaces: [TerminalSession.ID: GhosttySurfaceView] = [:]
+    /// One in-pane header per pane (icon + title + cwd), hosted SwiftUI.
+    /// Living INSIDE the pane region — never above or across the split —
+    /// is what lets the dividers run edge to edge.
+    private var headers: [TerminalSession.ID: NSHostingView<PaneHeaderView>] = [:]
     private var focusedID: TerminalSession.ID?
     /// The pane last handed first responder by this host. Focus is granted
     /// only when the focused pane changes (or its surface is newly
@@ -78,6 +84,7 @@ final class SplitLayoutHostView: NSView {
 
     func apply(
         tree: SplitNode?,
+        sessions: [TerminalSession.ID: TerminalSession],
         surfaces: [TerminalSession.ID: GhosttySurfaceView],
         focusedID: TerminalSession.ID?
     ) {
@@ -100,6 +107,28 @@ final class SplitLayoutHostView: NSView {
         }
         self.surfaces = surfaces
 
+        // Headers track the surfaces one-to-one: refresh live ones with the
+        // session's current title/process/cwd, drop the ones whose pane
+        // left, and mount headers for new panes.
+        for (id, header) in headers where surfaces[id] == nil || sessions[id] == nil {
+            header.removeFromSuperview()
+            headers.removeValue(forKey: id)
+        }
+        for id in surfaces.keys {
+            guard let session = sessions[id] else { continue }
+            let rootView = PaneHeaderView(session: session) { [weak self] in
+                self?.focusPane(id)
+            }
+            if let header = headers[id] {
+                header.rootView = rootView
+            } else {
+                let header = NSHostingView(rootView: rootView)
+                header.sizingOptions = []
+                headers[id] = header
+                addSubview(header)
+            }
+        }
+
         layoutPanes()
 
         if let focusedID, let surface = surfaces[focusedID],
@@ -110,6 +139,14 @@ final class SplitLayoutHostView: NSView {
         if focusedID == nil {
             lastFocusGrant = nil
         }
+    }
+
+    /// A pane header was clicked: hand the keyboard to that pane's
+    /// terminal. Focus syncs the sidebar selection via onFocusGained, so
+    /// this one call covers both the already-selected and sibling case.
+    private func focusPane(_ id: TerminalSession.ID) {
+        guard let surface = surfaces[id] else { return }
+        window?.makeFirstResponder(surface)
     }
 
     private func grantFocus(to surface: GhosttySurfaceView) {
@@ -136,6 +173,10 @@ final class SplitLayoutHostView: NSView {
     /// comfortable.
     static let dividerThickness: CGFloat = 6
 
+    /// The in-pane header band: two compact lines (title, then cwd) plus
+    /// breathing room, sitting on the terminal background inside the pane.
+    static let paneHeaderHeight: CGFloat = 40
+
     private func layoutPanes() {
         guard let tree, bounds.width > 0, bounds.height > 0 else {
             dividers.values.forEach { $0.removeFromSuperview() }
@@ -153,7 +194,19 @@ final class SplitLayoutHostView: NSView {
     private func place(_ node: SplitNode, in rect: CGRect, path: SplitPath, used: inout Set<SplitPath>) {
         switch node {
         case .leaf(let id):
-            surfaces[id]?.frame = rect.integral
+            // Header inside the pane's own region, surface below it — the
+            // header claims the top band only within this leaf, so nothing
+            // spans across a divider.
+            let paneRect = rect.integral
+            let headerHeight = min(Self.paneHeaderHeight, paneRect.height)
+            headers[id]?.frame = CGRect(
+                x: paneRect.minX, y: paneRect.minY,
+                width: paneRect.width, height: headerHeight
+            )
+            surfaces[id]?.frame = CGRect(
+                x: paneRect.minX, y: paneRect.minY + headerHeight,
+                width: paneRect.width, height: max(paneRect.height - headerHeight, 0)
+            )
         case .split(let branch):
             let thickness = Self.dividerThickness
             let firstRect: CGRect
@@ -262,5 +315,105 @@ final class SplitDividerView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         onDragEnded?()
+    }
+}
+
+// MARK: - Pane header
+
+/// The header INSIDE each pane: the tab's process icon and title, with the
+/// working directory on a quieter second line below. One component serves
+/// split panes and the unsplit tab alike (a plain tab is a single-leaf
+/// tree through the same host path). Display only — no buttons, no hover
+/// actions; clicking it focuses the pane's terminal.
+struct PaneHeaderView: View {
+    let session: TerminalSession
+    let onActivate: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            PaneHeaderBadge(process: session.runningProcess, ink: ink)
+                .frame(width: 16, height: 16)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.title)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(ink.opacity(0.85))
+                    .lineLimit(1)
+
+                Text(displayPath)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(ink.opacity(0.4))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 7)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .contentShape(Rectangle())
+        // Never steals the keyboard: a click routes focus to this pane's
+        // terminal (which also syncs the sidebar selection).
+        .onTapGesture { onActivate() }
+    }
+
+    /// Ink keyed to the terminal background's luminance, not the app
+    /// appearance — the header sits on the Ghostty theme like the old
+    /// strip did.
+    private var ink: Color {
+        GhosttyRuntime.shared.terminalColorScheme == .light ? .black : .white
+    }
+
+    /// Home-relative path ("~", "~/…"), the app's path shorthand; absolute
+    /// elsewhere. Middle truncation keeps the leaf folder readable when
+    /// the pane is narrow.
+    private var displayPath: String {
+        let home = NSHomeDirectory()
+        let path = session.workingDirectory
+        if path == home || path == "~" { return "~" }
+        if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
+        return path
+    }
+}
+
+/// The pane header's icon slot — the 16pt twin of the sidebar row's badge,
+/// but inked off the terminal background's luminance: agents keep their
+/// full-color mark, known tools their symbol, live-but-unknown processes
+/// the blue glyph, idle panes the quiet grey one.
+private struct PaneHeaderBadge: View {
+    let process: TabProcess?
+    let ink: Color
+
+    var body: some View {
+        if let process {
+            switch process.badge {
+            case .agent(let base):
+                // Asset variants key off the terminal background, not the
+                // system appearance; overriding the environment scheme
+                // makes the catalog resolve the matching one.
+                Image("\(base)16")
+                    .resizable()
+                    .renderingMode(.original)
+                    .aspectRatio(contentMode: .fit)
+                    .environment(\.colorScheme, GhosttyRuntime.shared.terminalColorScheme)
+            case .symbol(let name):
+                Image(systemName: name)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(ink.opacity(0.6))
+            case .dot:
+                Image("TerminalIdle16")
+                    .resizable()
+                    .renderingMode(.template)
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(Color.blue.opacity(0.8))
+            }
+        } else {
+            Image("TerminalIdle16")
+                .resizable()
+                .renderingMode(.template)
+                .aspectRatio(contentMode: .fit)
+                .foregroundStyle(ink.opacity(0.45))
+        }
     }
 }
