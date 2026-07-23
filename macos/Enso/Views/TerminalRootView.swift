@@ -71,10 +71,16 @@ struct TerminalRootView: View {
             // representable mid-switch.
             TerminalWorkspaceView(store: store, cardCornerRadius: cardCornerRadius)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Split: the clip outsets far past the workspace so the
+                // pane cards' own shadows fade into the chrome instead of
+                // being cut off at the old card boundary — a clipped
+                // shadow reads as a faint containing box around the panes.
+                // (An inset value, not a structural branch: swapping the
+                // modifier would recreate the Metal-backed representable.)
                 .clipShape(RoundedRectangle(
-                    cornerRadius: isSplitSelection ? 0 : cardCornerRadius,
+                    cornerRadius: cardCornerRadius,
                     style: .continuous
-                ))
+                ).inset(by: isSplitSelection ? -60 : 0))
                 .overlay(
                     RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                         .strokeBorder(Theme.ink.opacity(0.09), lineWidth: 1)
