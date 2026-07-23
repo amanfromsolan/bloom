@@ -109,6 +109,23 @@ struct TerminalCommands: Commands {
 
             Divider()
 
+            // Ghostty's split convention: ⌘D right, ⇧⌘D down. Each split is
+            // a real new tab continuing in the focused pane's directory, so
+            // it also subsumes "Duplicate Tab" (which stays palette-only).
+            Button("Split Right") {
+                store.splitSelection(direction: .horizontal)
+            }
+            .keyboardShortcut("d", modifiers: .command)
+            .disabled(store.selection == nil)
+
+            Button("Split Down") {
+                store.splitSelection(direction: .vertical)
+            }
+            .keyboardShortcut("d", modifiers: [.command, .shift])
+            .disabled(store.selection == nil)
+
+            Divider()
+
             Button("Previous Tab") {
                 store.focusPreviousSession()
             }

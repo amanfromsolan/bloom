@@ -275,6 +275,22 @@ private struct NewSpaceTeaser: View {
 
 // MARK: - One space page
 
+/// One renderable sidebar entry after split-container grouping: a plain
+/// tab row, a split container's stacked member rows, or a folder.
+private enum SidebarDisplayEntry: Identifiable {
+    case tab(TerminalSession)
+    case splitGroup(SplitContainer.ID, [TerminalSession])
+    case folder(TerminalFolder)
+
+    var id: UUID {
+        switch self {
+        case .tab(let session): session.id
+        case .splitGroup(let containerID, _): containerID
+        case .folder(let folder): folder.id
+        }
+    }
+}
+
 private struct SpacePage: View {
     @ObservedObject var store: TerminalSessionStore
     @ObservedObject private var namer = TabAutoNamer.shared
@@ -583,17 +599,113 @@ private struct SpacePage: View {
             }
 
             // Loose tabs and folders render in one interleaved order — the
-            // same order the drop projection flattens.
-            ForEach(space.pinnedItems) { item in
-                switch item {
-                case .tab(let session):
-                    sessionRow(session)
-                case .folder(let folder):
-                    folderSection(folder)
-                }
+            // same order the drop projection flattens — with split-container
+            // members folded into their group chrome.
+            ForEach(pinnedEntries) { entry in
+                displayEntry(entry)
             }
         }
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Split-container grouping
+
+    /// The pinned zone's display entries: folders pass through; loose tabs
+    /// fold into split groups where they are container members. The group
+    /// renders at the first member's position and absorbs the others —
+    /// tolerant of members that ended up non-adjacent.
+    private var pinnedEntries: [SidebarDisplayEntry] {
+        var entries: [SidebarDisplayEntry] = []
+        var consumed: Set<TerminalSession.ID> = []
+        let looseTabs = space.pinnedSessions
+        for item in space.pinnedItems {
+            switch item {
+            case .folder(let folder):
+                entries.append(.folder(folder))
+            case .tab(let session):
+                guard !consumed.contains(session.id) else { continue }
+                if let container = store.splitContainer(containing: session.id) {
+                    let members = looseTabs.filter { container.tree.contains($0.id) }
+                    members.forEach { consumed.insert($0.id) }
+                    entries.append(.splitGroup(container.id, members))
+                } else {
+                    entries.append(.tab(session))
+                }
+            }
+        }
+        return entries
+    }
+
+    /// Same grouping for a flat tab list (folder children, ephemeral zone).
+    private func groupedTabEntries(_ tabs: [TerminalSession]) -> [SidebarDisplayEntry] {
+        var entries: [SidebarDisplayEntry] = []
+        var consumed: Set<TerminalSession.ID> = []
+        for session in tabs {
+            guard !consumed.contains(session.id) else { continue }
+            if let container = store.splitContainer(containing: session.id) {
+                let members = tabs.filter { container.tree.contains($0.id) }
+                members.forEach { consumed.insert($0.id) }
+                entries.append(.splitGroup(container.id, members))
+            } else {
+                entries.append(.tab(session))
+            }
+        }
+        return entries
+    }
+
+    /// Folders render only at the pinned zone's top level (they can't
+    /// nest), so this splits from `tabEntry` to keep the view recursion
+    /// finite: folderSection's children go straight to tabEntry.
+    @ViewBuilder
+    private func displayEntry(_ entry: SidebarDisplayEntry) -> some View {
+        switch entry {
+        case .folder(let folder):
+            folderSection(folder)
+        default:
+            tabEntry(entry)
+        }
+    }
+
+    @ViewBuilder
+    private func tabEntry(_ entry: SidebarDisplayEntry) -> some View {
+        switch entry {
+        case .tab(let session):
+            sessionRow(session)
+        case .splitGroup(let containerID, let members):
+            splitGroup(containerID, members)
+        case .folder:
+            // groupedTabEntries never emits folders.
+            EmptyView()
+        }
+    }
+
+    /// A split container in the sidebar: member tabs stacked flat (in
+    /// creation order, regardless of split geometry) inside a slightly
+    /// darker, bordered group. Rows inside are ordinary session rows —
+    /// selection, badges, hover close, and renames all keep working.
+    private func splitGroup(_ containerID: SplitContainer.ID, _ members: [TerminalSession]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(members) { session in
+                sessionRow(session)
+            }
+        }
+        .padding(.horizontal, 3)
+        // The first row's own top gap doubles as the group's top inset;
+        // mirror it below so the border wraps evenly.
+        .padding(.bottom, SpacePage.rowGap)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color(nsColor: Theme.dynamic(
+                    dark: NSColor(white: 0, alpha: 0.22),
+                    light: NSColor(white: 0, alpha: 0.05)
+                )))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(Theme.ink.opacity(0.09), lineWidth: 1)
+        )
+        .padding(.top, SpacePage.rowGap)
+        .geometryGroup()
     }
 
     private var zoneDivider: some View {
@@ -615,8 +727,8 @@ private struct SpacePage: View {
 
     private var ephemeralZone: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(space.ephemeralSessions) { session in
-                sessionRow(session)
+            ForEach(groupedTabEntries(space.ephemeralSessions)) { entry in
+                tabEntry(entry)
             }
 
             Button {
@@ -834,8 +946,8 @@ private struct SpacePage: View {
             // so its row — and a rename field's focus binding — never exists
             // twice in the tree.
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(folder.sessions.filter { $0.id != peekingSession?.id }) { session in
-                    sessionRow(session)
+                ForEach(groupedTabEntries(folder.sessions.filter { $0.id != peekingSession?.id })) { entry in
+                    tabEntry(entry)
                 }
             }
             .padding(.leading, 14)

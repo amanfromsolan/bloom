@@ -602,6 +602,28 @@ final class CommandCenter: ObservableObject {
             commands.append(autoRenameTabItem(in: store))
 
             commands.append(PaletteItem(
+                id: "cmd-split-right",
+                icon: .symbol("rectangle.split.2x1"),
+                title: "Split Right",
+                context: "⌘D",
+                verb: "Split",
+                searchAliases: ["Split Horizontally", "Split Pane", "Vertical Split"]
+            ) { [weak store] in
+                store?.splitSelection(direction: .horizontal)
+            })
+
+            commands.append(PaletteItem(
+                id: "cmd-split-down",
+                icon: .symbol("rectangle.split.1x2"),
+                title: "Split Down",
+                context: "⇧⌘D",
+                verb: "Split",
+                searchAliases: ["Split Vertically", "Split Pane", "Horizontal Split"]
+            ) { [weak store] in
+                store?.splitSelection(direction: .vertical)
+            })
+
+            commands.append(PaletteItem(
                 id: "cmd-duplicate-tab",
                 icon: .symbol("plus.square.on.square"),
                 title: "Duplicate Tab",
