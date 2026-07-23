@@ -2336,35 +2336,26 @@ private struct IconDiscButtonStyle: ButtonStyle {
 }
 
 /// Pressed feel for sidebar rows: dips to 0.98 while the mouse is down and
-/// springs back on release. Tracked with a zero-distance drag held in
-/// `@GestureState`, so the scale resets the instant the pointer moves or the
-/// system cancels the gesture (a drag-to-reorder taking over) — the dip never
-/// follows a drag.
+/// springs back on release. Tracked with a never-completing long press
+/// (`minimumDuration: .infinity`), NOT a zero-distance DragGesture: a
+/// pending long press leaves the event stream unclaimed, so `.onDrag` can
+/// still start a drag-to-reorder session — a `DragGesture(minimumDistance:
+/// 0)` recognizes at mouse-down, claims the whole mouse-drag sequence, and
+/// no drag can ever begin. Straying past 2pt fails the press, so the dip
+/// resets the instant a drag takes over and never follows it; a failed
+/// press can't re-engage until the next mouse-down.
 private struct RowPressScale: ViewModifier {
-    /// One-way press tracking: `began` on the first event, `released` once
-    /// the pointer strays past the threshold. Wandering back over the press
-    /// point never re-engages the dip; `@GestureState` clears both on end or
-    /// cancel.
-    private struct PressState {
-        var began = false
-        var released = false
-    }
-
-    @GestureState private var press = PressState()
+    @State private var pressed = false
 
     func body(content: Content) -> some View {
-        let pressed = press.began && !press.released
-        return content
+        content
             .scaleEffect(pressed ? 0.98 : 1)
             .animation(.snappy(duration: 0.12), value: pressed)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .updating($press) { value, state, _ in
-                        state.began = true
-                        if hypot(value.translation.width, value.translation.height) >= 2 {
-                            state.released = true
-                        }
-                    }
+            .onLongPressGesture(
+                minimumDuration: .infinity,
+                maximumDistance: 2,
+                perform: {},
+                onPressingChanged: { pressed = $0 }
             )
     }
 }
